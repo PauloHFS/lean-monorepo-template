@@ -216,62 +216,53 @@ Sem Sentry self-hosted (pesado demais). Se precisar de error tracking, use Sentr
 
 ## Email transacional
 
-**SMTP-first.** Um caminho de código, N provedores. Quase todo provedor moderno (Resend, SES, Postmark, Mailgun, Brevo, Mailjet) aceita — só mudam 4 vars.
-
-| `EMAIL_PROVIDER` | Quando usar |
-|---|---|
-| `smtp` (default) | Sempre. Funciona pra dev (Mailpit) e prod (Resend, SES, Postmark, …) |
-| `logging` | CI/tests. Só emite log estruturado, sem rede |
+**SMTP-only.** Um caminho de código, qualquer provedor. Toda a configuração é por env, sem flag `EMAIL_PROVIDER`.
 
 ### Dev local (Mailpit)
 
 ```bash
-just up                                  # sobe Postgres + api + worker + mailpit
-just mail                                 # abre http://localhost:8025
-# .env:
-EMAIL_PROVIDER=smtp
-SMTP_HOST=mailpit
-SMTP_PORT=1025
-EMAIL_FROM="App <noreply@example.com>"
+just up                       # sobe Postgres + api + worker + mailpit
+just mail                     # abre http://localhost:8025
 ```
 
 Quando o worker processar `email.send`, o email aparece na UI do Mailpit. Zero credenciais, zero custo.
 
-### Prod (Resend via SMTP)
+### Prod — qualquer provedor SMTP
+
+| Provider | Host | Porta | TLS |
+|---|---|---|---|
+| Resend | `smtp.resend.com` | 465 | `SMTP_SSL=true` |
+| AWS SES | `email-smtp.<region>.amazonaws.com` | 587 | `SMTP_STARTTLS=true` |
+| Postmark | `smtp.postmarkapp.com` | 587 | `SMTP_STARTTLS=true` |
+| Mailgun | `smtp.mailgun.org` | 587 | `SMTP_STARTTLS=true` |
+| Brevo | `smtp-relay.brevo.com` | 587 | `SMTP_STARTTLS=true` |
+
+Exemplo (Resend):
 
 ```bash
-EMAIL_PROVIDER=smtp
 SMTP_HOST=smtp.resend.com
 SMTP_PORT=465
-SMTP_SSL=true                  # TLS implícito
-SMTP_USER=resend
+SMTP_SSL=true
+SMTP_USERNAME=resend
 SMTP_PASSWORD=${RESEND_API_KEY}
 EMAIL_FROM="App <noreply@example.com>"
 ```
 
-### Outros provedores SMTP
+Exemplo (SES):
 
 ```bash
-# AWS SES
 SMTP_HOST=email-smtp.us-east-1.amazonaws.com
 SMTP_PORT=587
 SMTP_STARTTLS=true
-SMTP_USER=AKIAxxxxxx
+SMTP_USERNAME=AKIAxxxxxx
 SMTP_PASSWORD=<smtp-password>
+EMAIL_FROM="App <noreply@example.com>"
+```
 
-# Postmark
-SMTP_HOST=smtp.postmarkapp.com
-SMTP_PORT=587
-SMTP_STARTTLS=true
-SMTP_USER=<server-token>
-SMTP_PASSWORD=<server-token>
+### Staging/CI sem envio real
 
-# Mailgun
-SMTP_HOST=smtp.mailgun.org
-SMTP_PORT=587
-SMTP_STARTTLS=true
-SMTP_USER=postmaster@<domain>
-SMTP_PASSWORD=<password>
+```bash
+EMAIL_LOG_ONLY=true   # só loga, não envia
 ```
 
 ---

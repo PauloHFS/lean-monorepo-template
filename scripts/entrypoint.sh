@@ -34,8 +34,8 @@ case "$ROLE" in
       --forwarded-allow-ips="*"
     ;;
   worker)
-    echo "[entrypoint] Subindo worker..."
-    exec python -m app.worker
+    echo "[entrypoint] Subindo worker (Procrastinate)..."
+    exec python -m app.jobs.runner
     ;;
   *)
     echo "[entrypoint] Role inválida: '$ROLE' (use 'api' ou 'worker')" >&2

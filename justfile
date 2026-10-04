@@ -48,7 +48,7 @@ api-run:
 
 # Sobe worker em foreground
 worker-run:
-    cd apps/api && . .venv/bin/activate && python -m app.worker
+    cd apps/api && . .venv/bin/activate && python -m app.jobs.runner
 
 # Sobe api + worker + front em paralelo. Ctrl-C derruba tudo.
 dev:
@@ -57,7 +57,7 @@ dev:
     @echo "web    -> http://localhost:5173"
     @echo "Ctrl-C para parar."
     cd apps/api && . .venv/bin/activate && uvicorn app.main:app --reload --port $API_PORT &
-    cd apps/api && . .venv/bin/activate && python -m app.worker &
+    cd apps/api && . .venv/bin/activate && python -m app.jobs.runner &
     cd apps/web && npm run dev
     @wait
 

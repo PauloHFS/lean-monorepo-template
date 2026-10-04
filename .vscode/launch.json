@@ -13,10 +13,10 @@
       "envFile": "${workspaceFolder}/.env"
     },
     {
-      "name": "Worker: JobRunner",
+      "name": "Worker: Procrastinate",
       "type": "debugpy",
       "request": "launch",
-      "module": "app.worker",
+      "module": "app.jobs.runner",
       "cwd": "${workspaceFolder}/apps/api",
       "justMyCode": true,
       "console": "integratedTerminal",
@@ -59,7 +59,7 @@
   "compounds": [
     {
       "name": "Dev stack (API + Worker)",
-      "configurations": ["API: FastAPI (uvicorn reload)", "Worker: JobRunner"]
+      "configurations": ["API: FastAPI (uvicorn reload)", "Worker: Procrastinate"]
     }
   ]
 }

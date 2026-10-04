@@ -87,6 +87,17 @@ class Settings(BaseSettings):
             )
         )
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def database_url_procrastinate(self) -> str:
+        """DSN libpq puro (psycopg3) para o Procrastinate.
+
+        O worker do Procrastinate exige um connector *async* (PsycopgConnector),
+        que recebe uma conninfo libpq (`postgresql://...`) — sem sufixo de driver
+        SQLAlchemy. Derivamos da DSN sync removendo o `+psycopg2`.
+        """
+        return self.database_url_sync.replace("+psycopg2", "")
+
     @property
     def is_prod(self) -> bool:
         return self.app_env == "prod"

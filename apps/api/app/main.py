@@ -23,6 +23,7 @@ from app.core.logging import get_logger
 from app.core.middleware import SecurityHeadersMiddleware
 from app.core.observability import setup_observability, setup_sentry
 from app.db.session import engine
+from app.jobs.app import app as procrastinate_app
 
 log = get_logger("api.main")
 
@@ -44,7 +45,10 @@ async def lifespan(app: FastAPI):
         log.exception("Falha ao conectar no Postgres")
         raise
 
-    yield
+    # Abre o pool do Procrastinate (usado por defer_async nos endpoints/CLI).
+    # O import de `app.jobs.app` também registra as tasks do app.
+    async with procrastinate_app.open_async():
+        yield
 
     await engine.dispose()
     log.info("API encerrada")

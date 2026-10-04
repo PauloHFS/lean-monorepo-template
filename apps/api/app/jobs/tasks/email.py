@@ -1,28 +1,32 @@
-"""Task: envio de e-mail via provider SMTP.
+"""Task: envio de e-mail via SMTP.
 
-SMTP-first: configurar SMTP_HOST/PORT/USER/PASSWORD. Em dev → Mailpit
-(captura na UI localhost:8025). Em prod → Resend, SES, Postmark, etc.
-EMAIL_PROVIDER=logging pra desativar SMTP e só logar.
+SMTP universal: configurar SMTP_HOST/PORT/USERNAME/PASSWORD (e SMTP_SSL ou SMTP_STARTTLS).
+Em dev → Mailpit (captura na UI localhost:8025). Em prod → Resend/SES/Postmark/Mailgun/Brevo.
+EMAIL_LOG_ONLY=true pra desativar envio e só logar.
+
+Procrastinate: a task recebe o `JobContext` como primeiro argumento
+(`pass_context=True`); os demais args são keyword-only no defer.
 """
 from __future__ import annotations
 
-from app.core import email
-from app.jobs.tasks.registry import JobContext
+import procrastinate
+
+from app.core import email as email_module
+from app.jobs.app import app
 
 
-async def send_email(ctx: JobContext) -> None:
-    to = ctx.payload.get("to")
-    subject = ctx.payload.get("subject", "(sem assunto)")
-    body = ctx.payload.get("body", "")
-    html = ctx.payload.get("html")
+@app.task(queue="email", name="email.send", retry=True, pass_context=True)
+async def send_email(
+    ctx: procrastinate.JobContext,
+    to: str | list[str],
+    subject: str,
+    text: str | None = None,
+    html: str | None = None,
+) -> dict:
+    """Envia e-mail. Retorna {"to": [...], "subject": "..."} como resultado do job.
 
-    if not to:
-        raise ValueError("payload.to é obrigatório")
-
-    await email.send_email(
-        to=to,
-        subject=subject,
-        text=body or None,
-        html=html,
-    )
-    ctx.log.info("email task done", to=to, subject=subject)
+    `ctx` fica disponível para middlewares/logs futuros; o corpo não o usa ainda.
+    """
+    recipients = to if isinstance(to, list) else [to]
+    await email_module.send_email(to=to, subject=subject, text=text, html=html)
+    return {"to": recipients, "subject": subject}

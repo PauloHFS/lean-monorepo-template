@@ -1,16 +1,24 @@
-"""Email transacional — SMTP-first.
+"""Email transacional — SMTP-only.
 
-Por que SMTP? Quase todo provedor (Resend, SES, Postmark, Mailgun, Brevo,
-Mailjet, Zoho) tem SMTP. Um caminho de código, N provedores. A unica coisa
-que muda sao 4 vars de conexao:
-    SMTP_HOST=mailpit                       # dev
-    SMTP_PORT=1025                         # 1025 (Mailpit), 587 (STARTTLS), 465 (TLS)
-    SMTP_USER=...                          # opcional, se provedor exige auth
-    SMTP_PASSWORD=...                      # opcional
-    SMTP_SSL=true                          # port 465 (TLS implicito); false pra STARTTLS
-    SMTP_STARTTLS=false                    # port 587 (upgrade); true se provedor exige
+Quase todo provedor moderno aceita SMTP:
+- Resend: smtp.resend.com:465 (user=`resend`, senha=API key)
+- AWS SES: email-smtp.<region>.amazonaws.com:587 (STARTTLS + IAM user)
+- Postmark: smtp.postmarkapp.com:587 (STARTTLS)
+- Mailgun: smtp.mailgun.org:587 (STARTTLS)
+- Brevo: smtp-relay.brevo.com:587 (STARTTLS)
+- Dev local: Mailpit no compose (porta 1025, sem TLS)
 
-Pluggable mesmo assim — LoggingProvider so loga (CI/tests, sem SMTP).
+Configuração:
+    SMTP_HOST=mailpit                  # dev
+    SMTP_PORT=1025
+    SMTP_USERNAME=                     # vazio = sem auth (Mailpit)
+    SMTP_PASSWORD=
+    SMTP_SSL=false                     # true p/ porta 465
+    SMTP_STARTTLS=false                # true p/ porta 587
+    EMAIL_FROM="App <noreply@example.com>"
+    EMAIL_LOG_ONLY=false               # true = não envia, só loga
+
+Por que SMTP-only? Um único código, um único caminho de erro, todos os provedores.
 """
 from __future__ import annotations
 
@@ -18,7 +26,6 @@ import os
 from dataclasses import dataclass
 from email.message import EmailMessage as PyEmailMessage
 from functools import lru_cache
-from typing import Protocol
 
 import aiosmtplib
 
@@ -34,54 +41,46 @@ class EmailMessage:
     from_email: str | None = None  # override do EMAIL_FROM
 
 
-class EmailProvider(Protocol):
-    async def send(self, msg: EmailMessage) -> None: ...
-
-
-class LoggingProvider:
-    """So loga o payload (CI/tests)."""
-
-    def __init__(self) -> None:
-        self._log = get_logger("email")
-
-    async def send(self, msg: EmailMessage) -> None:
-        recipients = msg.to if isinstance(msg.to, list) else [msg.to]
-        self._log.info(
-            "email (stub)",
-            to=recipients,
-            subject=msg.subject,
-            text_len=len(msg.text or ""),
-            html_len=len(msg.html or ""),
-        )
-
-
 class SmtpProvider:
-    """SMTP generico. Dev: Mailpit. Prod: Resend/SES/Postmark/etc."""
+    """SMTP universal. Dev → Mailpit (porta 1025, sem TLS).
+    Prod → qualquer provedor via variáveis de ambiente."""
 
     def __init__(
         self,
         host: str,
         port: int,
         from_email: str,
-        *,
-        user: str | None = None,
+        username: str | None = None,
         password: str | None = None,
-        ssl: bool = False,      # TLS implicito (port 465)
-        starttls: bool = False,  # STARTTLS (port 587)
+        use_ssl: bool = False,
+        starttls: bool = False,
+        log_only: bool = False,
     ) -> None:
         self._host = host
         self._port = port
         self._from = from_email
-        self._user = user
-        self._password = password
-        self._ssl = ssl
+        self._username = username or None
+        self._password = password or None
+        self._use_ssl = use_ssl
         self._starttls = starttls
-        self._log = get_logger("email.smtp")
+        self._log_only = log_only
+        self._log = get_logger("email")
 
     async def send(self, msg: EmailMessage) -> None:
         recipients = msg.to if isinstance(msg.to, list) else [msg.to]
 
-        # Constrói mensagem MIME padrão do Python (multipart text/html)
+        if self._log_only:
+            self._log.info(
+                "email (log-only)",
+                to=recipients,
+                subject=msg.subject,
+                host=self._host,
+                text_len=len(msg.text or ""),
+                html_len=len(msg.html or ""),
+            )
+            return
+
+        # Constrói mensagem MIME padrão do Python (multipart/alternative se text+html).
         py_msg = PyEmailMessage()
         py_msg["From"] = msg.from_email or self._from
         py_msg["To"] = ", ".join(recipients)
@@ -94,41 +93,34 @@ class SmtpProvider:
         async with aiosmtplib.SMTP(
             hostname=self._host,
             port=self._port,
-            use_tls=self._ssl,
+            use_tls=self._use_ssl,
         ) as client:
-            if self._user and self._password:
-                await client.login(self._user, self._password)
-            if self._starttls and not self._ssl:
+            if self._starttls and not self._use_ssl:
                 await client.starttls()
+            if self._username and self._password:
+                await client.login(self._username, self._password)
             await client.send_message(py_msg)
 
         self._log.info(
-            "email enviado via SMTP",
+            "email enviado",
             to=recipients,
             subject=msg.subject,
             host=self._host,
-            port=self._port,
         )
 
 
 @lru_cache(maxsize=1)
-def get_provider() -> EmailProvider:
-    """Factory. EMAIL_PROVIDER=logging pra modo stub. Qualquer outro s: SMTP."""
-    kind = os.environ.get("EMAIL_PROVIDER", "smtp").lower()
-    from_email = os.environ.get("EMAIL_FROM", "noreply@example.com")
-
-    if kind == "logging":
-        return LoggingProvider()
-
-    # SMTP (default e qualquer valor nao-reconhecido cai aqui)
+def get_provider() -> SmtpProvider:
+    """SMTP é default. Qualquer coisa SMTP-relay (Mailpit, Resend, SES, ...) funciona."""
     return SmtpProvider(
         host=os.environ.get("SMTP_HOST", "localhost"),
         port=int(os.environ.get("SMTP_PORT", "1025")),
-        from_email=from_email,
-        user=os.environ.get("SMTP_USER") or None,
-        password=os.environ.get("SMTP_PASSWORD") or None,
-        ssl=os.environ.get("SMTP_SSL", "false").lower() == "true",
+        from_email=os.environ.get("EMAIL_FROM", "noreply@example.com"),
+        username=os.environ.get("SMTP_USERNAME"),
+        password=os.environ.get("SMTP_PASSWORD"),
+        use_ssl=os.environ.get("SMTP_SSL", "false").lower() == "true",
         starttls=os.environ.get("SMTP_STARTTLS", "false").lower() == "true",
+        log_only=os.environ.get("EMAIL_LOG_ONLY", "false").lower() == "true",
     )
 
 

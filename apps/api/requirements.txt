@@ -22,11 +22,15 @@ alembic==1.14.0
 bcrypt==4.2.1              # lib direto, sem passlib (incompatível c/ bcrypt>=4.1)
 itsdangerous==2.2.0        # assinatura do cookie de sessão
 
-# --- HTTP client (workers chamam webhooks) ---
-httpx==0.28.1
-
-# --- Email SMTP (Mailpit/dev, SES em prod) ---
+# --- Email SMTP (Mailpit dev, Resend/SES/Postmark/Mailgun/Brevo prod) ---
 aiosmtplib==3.0.1
+
+# --- Filas (Procrastinate, Postgres-first; sem Redis/Celery) ---
+procrastinate[sqlalchemy]==3.10.0
+# Driver psycopg3 (usado pelo connector async do Procrastinate). O extra
+# [binary] traz wheels com libpq embutida — necessário em macOS/dev sem libpq
+# do sistema; no Docker (libpq-dev) também funciona.
+psycopg[binary]==3.3.6
 
 # --- Logging / utilitários ---
 structlog==24.4.0

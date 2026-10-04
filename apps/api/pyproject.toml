@@ -27,6 +27,8 @@ ignore = [
 "migrations/*" = ["E", "F", "I", "B", "UP", "PL"]  # gerado, não mexe
 # observability.py: imports lazy são propositais (OTel/Sentry só carrega se env setado)
 "app/core/observability.py" = ["PLC0415"]
+# email.py: SmtpProvider tem 8 args de config — todos via env, não vale agrupar
+"app/core/email.py" = ["PLR0913", "PLR0917"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

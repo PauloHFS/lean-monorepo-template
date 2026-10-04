@@ -3,7 +3,8 @@
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
     "ignoreUnknown": true,
-    "include": ["src/**", "e2e/**", "*.{ts,tsx,js,jsx,json}", "!src/api/schema.d.ts"]
+    "include": ["src/**", "e2e/**", "*.{ts,tsx,js,jsx,json}"],
+    "ignore": ["src/api/schema.d.ts"]
   },
   "formatter": {
     "enabled": true,

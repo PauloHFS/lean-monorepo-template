@@ -21,6 +21,8 @@ from sqlalchemy import text
 from app.core.logging import get_logger
 from app.core.security import hash_password
 from app.db.session import SessionLocal
+from app.jobs.app import app as procrastinate_app
+from app.jobs.tasks.email import send_email
 from app.main import app as fastapi_app
 
 log = get_logger("cli")
@@ -103,23 +105,19 @@ async def _create_user(email: str, password: str, full_name: str | None) -> None
 
 
 async def _enqueue_job(kind: str, payload_json: str) -> None:
-    async with SessionLocal() as session:
-        async with session.begin():
-            row = (
-                await session.execute(
-                    text(
-                        """
-                        INSERT INTO background_jobs (kind, payload)
-                        VALUES (:k, :p::jsonb)
-                        RETURNING id, status
-                        """
-                    ),
-                    {"k": kind, "p": payload_json},
-                )
-                .mappings()
-                .first()
-            )
-        print(f"queued: id={row['id']} status={row['status']}")
+    """Enfileira um job via Procrastinate.
+
+    `kind` mapeia 1:1 pro nome da task; `payload_json` são os kwargs do defer.
+    """
+    payload = json.loads(payload_json)
+    tasks = {"email.send": send_email}
+    task = tasks.get(kind)
+    if task is None:
+        raise SystemExit(f"kind desconhecido: {kind} (conhecidos: {sorted(tasks)})")
+    # defer_async exige o App aberto (pool de conexões).
+    async with procrastinate_app.open_async():
+        job_id = await task.defer_async(**payload)
+    print(f"queued: id={job_id} task={kind}")
 
 
 async def _db_status() -> None:
@@ -127,7 +125,10 @@ async def _db_status() -> None:
         db_ok = (await session.execute(text("SELECT 1"))).scalar_one() == 1
         row = (
             await session.execute(
-                text("SELECT status, COUNT(*) AS n FROM background_jobs GROUP BY status")
+                text(
+                    "SELECT status::text AS status, COUNT(*) AS n "
+                    "FROM procrastinate_jobs GROUP BY status"
+                )
             )
             .mappings()
             .all()
