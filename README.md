@@ -3,18 +3,18 @@
 Template enxuto de monoprojeto com:
 
 - **Backend** Python 3.12 + FastAPI + SQLAlchemy 2.x async + Alembic
-- **Worker** Python (mesma imagem) consumindo fila Postgres via `SKIP LOCKED`
+- **Worker** [Procrastinate](https://procrastinate.readthedocs.io/) 3.10.0 (Postgres-only, mesma imagem da API)
 - **Frontend** React 18 + TypeScript + Vite + Tailwind + React Router
 - **Tipos ponta a ponta** via `openapi-typescript` (regenerados com `just web-types`)
 - **2FA** opcional: TOTP (Google Authenticator) + passkey (WebAuthn/Touch ID)
 - **Rate limit** em `/auth/login` e `/auth/register` (Postgres, sem Redis)
 - **Cache, filas, sessões, rate limit** — tudo em Postgres (sem Redis)
 - **Limpeza automática** via `pg_cron` (kv_cache, rate_limits, sessions, recovery codes)
-- **Email transacional** pluggable (Resend ou só log em dev)
-- **Observability** vendor-agnostic via OTel (Grafana stack self-hosted) + Sentry opcional
+- **Email transacional** SMTP (Mailpit em dev, Resend/SES/Postmark/Mailgun/Brevo em prod)
+- **Observability** vendor-agnostic via OTLP (Grafana stack self-hosted) + Sentry opcional
 - **E2E** com Playwright (smoke + jornada crítica)
-- **CI** (backend lint/type/test, frontend E2E)
-- **Banco único** Postgres (PostGIS, pgvector, ltree, pg_trgm, btree_gist, pgcrypto, uuid-ossp)
+- **CI** (backend lint/type/test, frontend lint/type/build, compose validate)
+- **Banco único** Postgres (PostGIS, pgvector, ltree, pg_trgm, btree_gist, pgcrypto, uuid-ossp, citext)
 - **Backup** automatizado para Cloudflare R2 (via `rclone`)
 
 > Filosofia: **Postgres-only**. Cache, filas, grafos, geo, vetores, sessões — tudo no mesmo banco. Menos infra, menos ops, transações ACID cobrindo o app inteiro.
@@ -26,16 +26,16 @@ Template enxuto de monoprojeto com:
 ```
 .
 ├── apps/
-│   ├── api/                  FastAPI + worker + migrations + CLI
+│   ├── api/                  FastAPI + worker (Procrastinate) + migrations + CLI
 │   │   ├── app/              código
 │   │   │   ├── api/          endpoints v1 + deps + schemas
 │   │   │   ├── core/         config, logging, security, cache, email, ratelimit,
 │   │   │   │                 observability, totp, webauthn, middleware
 │   │   │   ├── db/           SQLAlchemy (base, session, models)
-│   │   │   ├── jobs/         runner + tasks registry
+│   │   │   ├── jobs/         app.py (Procrastinate) + runner.py (entrypoint) + tasks/
 │   │   │   ├── cli.py        dump-openapi, seed, create-user, enqueue-job, db-status
 │   │   │   └── main.py       FastAPI app
-│   │   ├── migrations/       alembic (initial, rate_limits, kv_cache, 2fa, pg_cron)
+│   │   ├── migrations/       alembic (1 arquivo: 0001_initial_schema.py)
 │   │   └── tests/            pytest (37 testes)
 │   └── web/                  React SPA (Vite)
 │       ├── e2e/              Playwright specs
@@ -48,16 +48,17 @@ Template enxuto de monoprojeto com:
 ├── scripts/
 │   ├── entrypoint.sh         decide api|worker, roda migrations
 │   ├── backup.sh             pg_dump -> R2
+│   ├── check-schema-sync.sh  pre-commit: diff schema.d.ts vs backend
 │   ├── postgres-init/01-extensions.sql
 │   ├── otel-collector.yaml   (profile observability)
 │   ├── tempo.yaml
 │   └── prometheus.yml
-├── docs/architecture.md      11 ADRs
+├── docs/architecture.md      ADRs
 ├── Dockerfile                multi-stage (Node build + Python runtime)
-├── docker-compose.yml        Postgres + api + worker + (profile observability)
+├── docker-compose.yml        postgres + mailpit (+ app profile: api+worker, + observability profile)
 ├── justfile                  atalhos de DX
 ├── .env.example              template de variáveis
-└── .pre-commit-config.yaml   ruff + format + hooks básicos
+└── .pre-commit-config.yaml   pre-commit-hooks + schema-sync
 ```
 
 ---
@@ -84,28 +85,28 @@ Pra criar um admin e logar:
 just cli seed      # imprime email + senha aleatória
 ```
 
-## Dev local (sem Docker)
+## Dev local (Postgres em Docker, app no host)
 
-Em dois terminais:
+Útil quando você quer editar o código com HMR sem rebuildar a imagem:
 
 ```bash
-# 1) Postgres (ou use o do compose só pra banco)
-docker compose up -d postgres
+# 1) Postgres + Mailpit em Docker (app e worker ficam fora)
+docker compose up -d postgres mailpit
 
-# 2) API
+# 2) API (terminal 1)
 just api-install
 just api-migrate
 just api-run      # http://localhost:8000
 
-# 3) Worker (outro terminal)
+# 3) Worker (terminal 2)
 just worker-run
 
-# 4) Front
+# 4) Front (terminal 3)
 just web-install
 just web-dev      # http://localhost:5173 (proxy /api -> :8000)
 ```
 
-Pra subir tudo num comando só (api+worker+web paralelos): `just dev`.
+Pra rodar api+worker+web paralelos num comando só: `just dev`.
 
 > `just` é o command runner — instale com `brew install just` (macOS) ou `cargo install just` (Linux).
 
@@ -116,7 +117,7 @@ Pra subir tudo num comando só (api+worker+web paralelos): `just dev`.
 | Necessidade                | Solução                                                                                          |
 | -------------------------- | ------------------------------------------------------------------------------------------------ |
 | **Cache**                  | Tabela `kv_cache` (UNLOGGED + `expires_at`) — mais rápido que Redis, sem infra extra             |
-| **Fila / jobs**            | Tabela `background_jobs` + `SELECT … FOR UPDATE SKIP LOCKED` — escala, é ACID, sem Redis        |
+| **Filas / jobs**            | Procrastinate 3.10.0 (Postgres-only, heartbeat/stall built-in, DLQ opcional) — escala, ACID      |
 | **Sessões de auth**        | Tabela `sessions` com token opaco + hash — revogação instantânea, sem Redis                      |
 | **Rate limiting**          | Tabela `rate_limits` + janela fixa via `INSERT … ON CONFLICT DO UPDATE`                           |
 | **Limpeza automática**     | Extensão `pg_cron` — 4 jobs rodando sozinhos (kv_cache, rate_limits, sessions, recovery codes)    |
@@ -131,34 +132,31 @@ Quando algum caso *realmente* pede Redis (pub/sub com baixa latência, geofencin
 
 ---
 
-## Filas no Postgres — como funciona
+## Filas no Postgres — Procrastinate
 
-`apps/api/app/jobs/runner.py` implementa:
+`apps/api/app/jobs/app.py` configura o [Procrastinate](https://procrastinate.readthedocs.io/) 3.10.0:
 
-1. **Claim atômico** (CTE + `FOR UPDATE SKIP LOCKED` + UPDATE na mesma transação):
-   ```sql
-   WITH cte AS (
-     SELECT id FROM background_jobs
-      WHERE status IN ('pending','failed')
-        AND attempts < max_attempts
-        AND run_at <= now()
-     ORDER BY run_at LIMIT :batch
-     FOR UPDATE SKIP LOCKED
-   )
-   UPDATE background_jobs j
-      SET status='running', locked_by=:worker, attempts=attempts+1
-     FROM cte WHERE j.id = cte.id
-   RETURNING ...;
-   ```
-2. **Recover de jobs travados** no startup (worker morreu): `UPDATE … SET status='pending' WHERE status='running' AND locked_at < now() - timeout`.
-3. **Retry com backoff exponencial** (até `max_attempts`), registrado em `last_error`.
-4. **Idempotência**: cada task recebe `JobContext` com a `AsyncSession`; faça upserts quando precisar.
+- **Async nativo** (psycopg3) — não bloqueia o event loop.
+- **Heartbeat / stall recovery** automáticos — jobs travados são re-claimados pela lib.
+- **Periodic tasks** built-in (`@app.periodic(cron="*/5 * * * *")`).
+- **DLQ opcional** (`dead_letters`) — tarefas que falharam após `max_attempts`.
+- **Schema oficial** vem direto da lib (nunca duplicar ~600 linhas de SQL); a migration 0001 aplica via `SchemaManager.apply_schema()`.
 
-Para criar uma task:
-- Adicione `app/jobs/tasks/minha_task.py` com `async def minha_task(ctx: JobContext)`.
-- Registre em `app/jobs/tasks/__init__.py`: `register_task("meu.kind", minha_task)`.
+Pra criar uma task:
 
-A task `email.send` é o exemplo. Em dev, só loga. Em prod, usa Resend.
+```python
+# apps/api/app/jobs/tasks/minha_task.py
+from app.jobs.app import app
+
+@app.task(queue="default", name="minha.coisa", retry=True)
+async def minha_task(tenant_id: str) -> None:
+    # faça trabalho idempotente
+    ...
+```
+
+Importe o módulo em `app/jobs/tasks/__init__.py` (uma vez, no startup). Procrastinate descobre as tasks via `import_paths=["app.jobs.tasks.email"]` em `app.py`.
+
+A task `email.send` é o exemplo. Em dev → SMTP para o container `mailpit` (UI em <http://localhost:8025>). Em prod → qualquer SMTP-relay.
 
 ---
 
@@ -191,7 +189,7 @@ Recovery codes são aceitos no lugar do TOTP (caso o usuário perca o app).
 
 ## Observability (opcional, vendor-agnostic)
 
-App emite **OTLP** quando `OTEL_EXPARTER_OTLP_ENDPOINT` está setado. Sem env, é no-op.
+App emite **OTLP** quando `OTEL_EXPORTER_OTLP_ENDPOINT` está setado. Sem env, é no-op.
 
 ```bash
 # 1) Sobe a stack + Grafana/Tempo/Prometheus/OTel Collector
@@ -216,7 +214,7 @@ Sem Sentry self-hosted (pesado demais). Se precisar de error tracking, use Sentr
 
 ## Email transacional
 
-**SMTP-only.** Um caminho de código, qualquer provedor. Toda a configuração é por env, sem flag `EMAIL_PROVIDER`.
+**SMTP-only.** Um caminho de código, qualquer provedor.
 
 ### Dev local (Mailpit)
 
@@ -238,7 +236,6 @@ Quando o worker processar `email.send`, o email aparece na UI do Mailpit. Zero c
 | Brevo | `smtp-relay.brevo.com` | 587 | `SMTP_STARTTLS=true` |
 
 Exemplo (Resend):
-
 ```bash
 SMTP_HOST=smtp.resend.com
 SMTP_PORT=465
@@ -249,7 +246,6 @@ EMAIL_FROM="App <noreply@example.com>"
 ```
 
 Exemplo (SES):
-
 ```bash
 SMTP_HOST=email-smtp.us-east-1.amazonaws.com
 SMTP_PORT=587
@@ -300,15 +296,15 @@ O fluxo:
 3. `src/api/types.ts` reexporta os types relevantes.
 4. `src/api/endpoints.ts` declara helpers tipados por endpoint.
 
-Sempre que você **adicionar/alterar** um endpoint ou Pydantic model, rode `just web-types`. O `pre-commit` tem hook opcional pra detectar drift (veja `.pre-commit-config.yaml`).
+Sempre que você **adicionar/alterar** um endpoint ou Pydantic model, rode `just web-types`. O `pre-commit` recusa o commit se `schema.d.ts` estiver desatualizado (`just check-schema` pra checar manualmente).
 
 ---
 
 ## CI
 
 `.github/workflows/ci.yml`:
-- **backend**: ruff + mypy + pytest
-- **frontend**: tsc + build
+- **backend**: ruff + pyright + pytest
+- **frontend**: tsc + lint (Biome) + build
 - **compose**: valida que `docker-compose.yml` continua válido
 
 Local: `just ci` roda os mesmos checks.
@@ -325,14 +321,14 @@ Local: `just ci` roda os mesmos checks.
 - **Migrações**: `just api-revision "add foo"` → revisar antes de commitar.
 - **Segredos**: NUNCA comitar `.env`. Em prod, monte via secret manager do orquestrador.
 - **Logs**: `structlog` JSON em prod, console em dev (stderr pra não poluir stdout).
-- **Tests**: `just test` roda a suite de 39 testes. Tudo que não precisa de DB.
+- **Tests**: `just test` roda a suite de 37 testes. Tudo que não precisa de DB.
 - **E2E**: `just e2e` (assume stack up) ou `just e2e-full` (sobe stack, roda, derruba).
 
 ---
 
 ## Decisões de arquitetura (ADRs)
 
-`docs/architecture.md` lista em detalhe cada decisão: Postgres-only, SKIP LOCKED, bcrypt direto (não passlib), OpenAPI pipeline, SPA mesma origem, exception handler, CLI, tests, multi-region seams, observability vendor-agnostic, etc.
+`docs/architecture.md` lista em detalhe cada decisão: Postgres-only, Procrastinate, bcrypt direto (não passlib), OpenAPI pipeline, SPA mesma origem, exception handler, CLI, tests, multi-region seams, observability vendor-agnostic, etc.
 
 ---
 

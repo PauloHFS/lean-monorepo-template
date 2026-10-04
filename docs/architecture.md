@@ -29,22 +29,31 @@ pgcrypto, uuid-ossp, citext) as the single source of truth for everything except
 
 ---
 
-## AD-002 · SKIP LOCKED over Celery/RQ/Dramatiq
+## AD-002 · Procrastinate over Celery/RQ/custom SKIP LOCKED
 
 **Status**: current.
 
 **Context**: We need a job queue. Options: Celery (Redis/RabbitMQ broker), RQ, Dramatiq,
-arq, or a Postgres-only table.
+arq, a hand-rolled `background_jobs` + `SKIP LOCKED` runner, or **Procrastinate** (Postgres-only,
+async-native, lib maintained by PeopleDoc/UKG).
 
-**Decision**: `background_jobs` table + `SELECT … FOR UPDATE SKIP LOCKED` (claim) +
-`UPDATE … SET locked_at < :threshold` recovery (visibility timeout) +
-exponential backoff (capped at 5 min) + per-row `max_attempts`.
+We previously ran the hand-rolled `background_jobs` table + `SELECT … FOR UPDATE SKIP LOCKED`
++ visibility-timeout recovery + exponential backoff. It worked, but reinventing the wheel
+came with ongoing maintenance (heartbeat, stall detection, periodic tasks, DLQ, retry
+strategies — each implemented and tested by hand).
+
+**Decision**: Use **Procrastinate 3.10.0** as the queue. Schema is applied verbatim from the
+lib via `SchemaManager.apply_schema()` in the migration — no duplication.
 
 **Consequences**:
-- Same transactional guarantees as the rest of the app (claim + read in same tx is possible).
-- Survives broker outages: if Postgres is up, jobs survive; if a worker dies, recovery picks up.
-- Trade-off vs Celery: no built-in retries UI, no fanout, no `chord`/`chain`. Fine for most apps.
-- See `apps/api/app/jobs/runner.py` for the implementation.
+- Postgres-only: same transactional guarantees as the rest of the app.
+- Async-native (psycopg3), so the API event loop is never blocked by worker I/O.
+- Heartbeat + stall recovery are handled by the lib, not by us.
+- Periodic tasks built-in (`@app.periodic(cron="...")`).
+- Trade-off: a few advanced Celery features (chains, chords, fanout canvas) aren't available.
+  For our use cases, the `@app.task` decorator + `defer_async` covers everything.
+- See `apps/api/app/jobs/app.py` for the wiring and `apps/api/app/jobs/tasks/email.py` for an
+  example task.
 
 ---
 
@@ -197,12 +206,12 @@ estaria quando virar. Sem isso, qualquer decisão de infra precisa reabrir tudo.
 | Componente | Estado hoje | Quando virar multi-region |
 |---|---|---|
 | `sessions.token_hash` | único Postgres | precisa replicação síncrona (ou shared store) |
-| `background_jobs` | uma fila global | múltiplos `locked_by` por região precisam de quorum |
+| Procrastinate (`procrastinate_jobs`) | uma fila global | múltiplos `locked_by` por região precisam de quorum / sharding |
 | `rate_limits` | local ao cluster | pode ser local + sync entre regiões |
 | Cookie `__Host-` | não usa | importante para multi-domain |
 | `app.cli dump-openapi` | uma URL | por região |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | uma | múltiplos collectors |
-| Worker `recover_stuck()` | global | por região, com `region` na chave |
+| Procrastinate heartbeat/recovery | lib trata | por região, com `region` na chave de claim |
 
 **Critério para ativar:**
 - Latência p99 de geo > 200ms em algum mercado alvo.
@@ -243,4 +252,5 @@ vendor. Grafana stack é a stack open-source/self-hosted que o usuário pediu.
 
 ## Future ADs (open questions)
 
-- **2FA / passkeys** — UX decision first.
+- _(none open — all shipped infra is documented above; product-level decisions like
+  2FA enforcement policy and OAuth/SSO live in the project README roadmap)_
