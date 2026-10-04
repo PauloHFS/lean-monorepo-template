@@ -36,7 +36,7 @@ data/
 
 # ---- IDEs / OS ----
 .idea/
-.vscode/
+.vscode/settings.local.json
 *.swp
 .DS_Store
 Thumbs.db

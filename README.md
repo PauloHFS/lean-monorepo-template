@@ -326,11 +326,15 @@ Local: `just ci` roda os mesmos checks.
 
 ## Convenções
 
-- **Lint/typecheck**: Backend usa ruff + mypy (`just lint`, `just typecheck`). Front usa `tsc --noEmit`.
+- **Lint/typecheck**:
+  - Backend: `ruff` (linter + formatter) + `pyright` (type checker). `just lint`, `just typecheck`.
+  - Frontend: `biome` (linter + formatter + import sort, único tool). `just web-lint`, `just web-lint-fix`.
+  - Tudo roda em `just ci` (mesmo do GitHub Actions).
+- **Editor (VSCode)**: `.vscode/` tem settings compartilhadas (Biome como formatter default, Ruff no Python, Pyright, Tailwind, etc.), launch configs (API, worker, pytest) e tasks (`just init`, `just dev`, `just ci`, etc.). Abre o workspace e o VSCode oferece instalar as extensões recomendadas.
 - **Migrações**: `just api-revision "add foo"` → revisar antes de commitar.
 - **Segredos**: NUNCA comitar `.env`. Em prod, monte via secret manager do orquestrador.
 - **Logs**: `structlog` JSON em prod, console em dev (stderr pra não poluir stdout).
-- **Tests**: `just test` roda a suite de 37 testes. Tudo que não precisa de DB.
+- **Tests**: `just test` roda a suite de 39 testes. Tudo que não precisa de DB.
 - **E2E**: `just e2e` (assume stack up) ou `just e2e-full` (sobe stack, roda, derruba).
 
 ---

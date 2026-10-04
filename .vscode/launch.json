@@ -1,0 +1,65 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "API: FastAPI (uvicorn reload)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--reload", "--port", "${env:API_PORT}", "--log-level", "info"],
+      "cwd": "${workspaceFolder}/apps/api",
+      "justMyCode": true,
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "Worker: JobRunner",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "app.worker",
+      "cwd": "${workspaceFolder}/apps/api",
+      "justMyCode": true,
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "CLI: arbitrary",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "app.cli",
+      "args": [],
+      "cwd": "${workspaceFolder}/apps/api",
+      "justMyCode": true,
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "pytest: current file",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-x", "-q", "${file}"],
+      "cwd": "${workspaceFolder}/apps/api",
+      "justMyCode": false,
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "pytest: all",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-q"],
+      "cwd": "${workspaceFolder}/apps/api",
+      "justMyCode": false,
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Dev stack (API + Worker)",
+      "configurations": ["API: FastAPI (uvicorn reload)", "Worker: JobRunner"]
+    }
+  ]
+}

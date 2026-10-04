@@ -1,0 +1,24 @@
+{
+  "recommendations": [
+    "biomejs.biome",
+    "charliermarsh.ruff",
+    "ms-python.python",
+    "ms-pyright.pyright",
+    "bradlc.vscode-tailwindcss",
+    "tamasfe.even-better-toml",
+    "editorconfig.editorconfig",
+    "ms-azuretools.vscode-docker",
+    "ms-playwright.playwright",
+    "vitest.explorer",
+    "eamodio.gitlens",
+    "usernamehw.errorlens",
+    "esbenp.prettier-vscode"
+  ],
+  "unwantedRecommendations": [
+    "ms-python.black-formatter",
+    "ms-python.flake8",
+    "ms-python.isort",
+    "ms-python.mypy-type-checker",
+    "dbaeumer.vscode-eslint"
+  ]
+}

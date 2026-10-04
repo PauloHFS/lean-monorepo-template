@@ -1,0 +1,43 @@
+{
+  "include": ["app", "tests"],
+  "exclude": ["**/__pycache__", ".venv", "migrations/versions"],
+
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+
+  "reportMissingImports": "error",
+  "reportMissingTypeStubs": "warning",
+  "reportUnusedImport": "warning",
+  "reportUnusedVariable": "warning",
+  "reportUnusedFunction": "warning",
+  "reportOptionalMemberAccess": "error",
+  "reportOptionalOperand": "error",
+  "reportOptionalSubscript": "error",
+  "reportOptionalIterable": "error",
+  "reportOptionalCall": "error",
+  "reportGeneralTypeIssues": "error",
+  "reportArgumentType": "error",
+  "reportAttributeAccessIssue": "error",
+  "reportAssignmentType": "error",
+  "reportCallIssue": "error",
+  "reportDeprecated": "warning",
+  "reportIndexIssue": "error",
+  "reportInvalidTypeArguments": "error",
+  "reportInvalidTypeForm": "error",
+  "reportPossiblyUnboundVariable": "error",
+  "reportTypedDictNotRequiredAccess": "error",
+  "reportUndefinedVariable": "error",
+
+  "ignore": [
+    "app/jobs/runner.py",
+    "app/api/deps.py",
+    "app/api/v1/endpoints/*.py",
+    "app/cli.py",
+    "app/core/ratelimit.py",
+    "app/core/cache.py",
+    "app/core/totp.py",
+    "app/core/webauthn.py",
+    "app/core/observability.py",
+    "tests/**"
+  ]
+}

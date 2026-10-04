@@ -10,7 +10,7 @@ import asyncio
 from app.core.logging import get_logger
 
 # Importar tasks aqui é o que dispara `register_task(...)`
-from app.jobs import tasks  # noqa: F401
+from app.jobs import tasks  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.jobs.runner import JobRunner, install_signal_handlers
 
 log = get_logger("worker.main")

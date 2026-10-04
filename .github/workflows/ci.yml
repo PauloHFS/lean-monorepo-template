@@ -30,14 +30,14 @@ jobs:
       - name: Lint (ruff)
         run: . .venv/bin/activate && ruff check .
 
-      - name: Typecheck (mypy)
-        run: . .venv/bin/activate && mypy app
+      - name: Typecheck (pyright)
+        run: . .venv/bin/activate && pyright app
 
       - name: Test (pytest)
         run: . .venv/bin/activate && pytest -q
 
   frontend:
-    name: frontend (typecheck + build)
+    name: frontend (lint + typecheck + build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -52,6 +52,7 @@ jobs:
 
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run lint
       - run: npm run build
 
   compose:

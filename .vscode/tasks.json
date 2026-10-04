@@ -1,0 +1,103 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "init: docker compose up + build",
+      "type": "shell",
+      "command": "just init",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "up: stack (postgres + api + worker + mailpit)",
+      "type": "shell",
+      "command": "just up",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "up + observability (grafana/tempo/prometheus)",
+      "type": "shell",
+      "command": "just up-obs",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "down: docker compose down",
+      "type": "shell",
+      "command": "just down",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "dev: api + worker + vite em paralelo",
+      "type": "shell",
+      "command": "just dev",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "runOptions": { "runOn": "folderOpen" }
+    },
+    {
+      "label": "ci: roda tudo que o GitHub Actions roda",
+      "type": "shell",
+      "command": "just ci",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "test: pytest -q",
+      "type": "shell",
+      "command": "just test",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "lint backend (ruff)",
+      "type": "shell",
+      "command": "just lint",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "typecheck backend (pyright)",
+      "type": "shell",
+      "command": "just typecheck",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "lint frontend (biome)",
+      "type": "shell",
+      "command": "just web-lint-fix",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "web: regenerate schema.d.ts",
+      "type": "shell",
+      "command": "just web-types",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "db: migrate upgrade head",
+      "type": "shell",
+      "command": "just api-migrate",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "db: psql shell",
+      "type": "shell",
+      "command": "just psql",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "mail: open Mailpit UI",
+      "type": "shell",
+      "command": "just mail",
+      "problemMatcher": []
+    }
+  ]
+}

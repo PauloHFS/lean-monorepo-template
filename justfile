@@ -69,17 +69,18 @@ test:
 lint:
     cd apps/api && . .venv/bin/activate && ruff check .
 
-# Typecheck do backend
+# Typecheck do backend (pyright)
 typecheck:
-    cd apps/api && . .venv/bin/activate && mypy app
+    cd apps/api && . .venv/bin/activate && pyright app
 
 # Roda tudo que o CI roda: testes + lint + typecheck do backend
-# + typecheck do front + valida o docker compose
+# + typecheck + lint do front + valida o docker compose
 ci:
     @echo "==> tests"    && just test
     @echo "==> lint"     && just lint
-    @echo "==> mypy"     && just typecheck
+    @echo "==> pyright"  && just typecheck
     @echo "==> web tsc"  && just web-typecheck
+    @echo "==> web lint" && just web-lint
     @echo "==> compose"  && just validate-compose
 
 # Sobe a stack + Grafana/Tempo/Prometheus (profile observability)
@@ -89,6 +90,14 @@ up-obs:
 # Typecheck do frontend (separado porque o nome bate com `typecheck` do backend)
 web-typecheck:
     cd apps/web && npm run typecheck
+
+# Lint do frontend (Biome)
+web-lint:
+    cd apps/web && npm run lint
+
+# Lint + auto-fix no frontend
+web-lint-fix:
+    cd apps/web && npm run lint:fix
 
 # Confirma que o compose continua válido
 validate-compose:

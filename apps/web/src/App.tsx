@@ -1,10 +1,10 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from 'react-router-dom'
 
-import { AuthProvider } from "./lib/auth";
-import { Login } from "./pages/Login";
-import { Dashboard } from "./pages/Dashboard";
-import { NotFound } from "./pages/NotFound";
-import { Security } from "./pages/Security";
+import { AuthProvider } from './lib/auth'
+import { Dashboard } from './pages/Dashboard'
+import { Login } from './pages/Login'
+import { NotFound } from './pages/NotFound'
+import { Security } from './pages/Security'
 
 export default function App() {
   return (
@@ -17,5 +17,5 @@ export default function App() {
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AuthProvider>
-  );
+  )
 }
