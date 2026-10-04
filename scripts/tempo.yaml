@@ -1,0 +1,18 @@
+# Tempo — single binary, sem deps externas. Recebe OTLP, expõe API em :3200.
+server:
+  http_listen_address: 0.0.0.0:3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal

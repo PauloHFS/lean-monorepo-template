@@ -1,0 +1,140 @@
+# =============================================================================
+# Stack do lean monorepo.
+# Perfis:
+#   - default: sobe só Postgres (dev leve)
+#   - app:     Postgres + api + worker
+# =============================================================================
+name: lean-monorepo
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: lm_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      TZ: ${TZ:-UTC}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---- Mailpit: SMTP server com web UI para dev/test ----------------------
+  # Captura emails enviados pelo SmtpProvider. Ver em http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: lm_mailpit
+    restart: unless-stopped
+    environment:
+      MP4_SMTP_AUTH_ACCEPT_ANY: 1
+      MP4_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lm_api
+    profiles: ["app"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      SPA_DIST_PATH: /app/apps/web/dist
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./apps/api:/app/apps/api:ro
+      - ./scripts:/app/scripts:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["bash", "-lc", "/app/scripts/entrypoint.sh api"]
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lm_worker
+    profiles: ["app"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+    volumes:
+      - ./apps/api:/app/apps/api:ro
+      - ./scripts:/app/scripts:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["bash", "-lc", "/app/scripts/entrypoint.sh worker"]
+
+  # ---- Observability (Grafana stack, free e self-hosted) -------------------
+  # Sobe com: docker compose --profile observability up -d
+  # Quando ativo, o app deve ser startado com:
+  #   OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    container_name: lm_otel_collector
+    profiles: ["observability"]
+    restart: unless-stopped
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./scripts/otel-collector.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    container_name: lm_tempo
+    profiles: ["observability"]
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./scripts/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"   # tempo API
+
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    container_name: lm_prometheus
+    profiles: ["observability"]
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./scripts/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom-data:/prometheus
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: lm_grafana
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+volumes:
+  pgdata:
+  tempo-data:
+  prom-data:
+  grafana-data:

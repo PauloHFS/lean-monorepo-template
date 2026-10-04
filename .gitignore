@@ -1,0 +1,58 @@
+# =============================================================================
+# Lean Monorepo — gitignore
+# =============================================================================
+
+# ---- Ambiente ----
+.env
+.env.*
+!.env.example
+
+# ---- Python (apps/api) ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+apps/api/.venv/
+apps/api/dist/
+apps/api/build/
+
+# ---- Node (apps/web) ----
+apps/web/node_modules/
+apps/web/dist/
+apps/web/.vite/
+apps/web/.next/
+apps/web/.tanstack/
+*.tsbuildinfo
+
+# ---- OpenAPI (gerado) ----
+apps/api/openapi.json
+
+# ---- Docker / volumes locais ----
+data/
+.pgdata/
+
+# ---- IDEs / OS ----
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Playwright ----
+apps/web/playwright-report/
+apps/web/test-results/
+apps/web/blob-report/
+apps/web/playwright/.cache/
+
+# ---- Coverage ----
+.coverage
+htmlcov/
+*.cover
+.pytest_cov*

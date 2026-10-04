@@ -1,0 +1,54 @@
+# =============================================================================
+# Lean Monorepo — dockerignore.
+# Sem este arquivo, o `COPY .` leva .venv, __pycache__, node_modules,
+# .git, .env, etc. para a imagem — deixando-a gigante e potencialmente
+# vazando segredos.
+# =============================================================================
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# Ambiente / segredos
+.env
+.env.*
+!.env.example
+
+# Backend (Python)
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+apps/api/.venv
+apps/api/dist
+apps/api/build
+apps/api/openapi.json
+
+# Frontend (Node)
+apps/web/node_modules
+apps/web/dist
+apps/web/.vite
+
+# OpenAPI gerado
+apps/api/openapi.json
+
+# OS / IDEs
+.DS_Store
+Thumbs.db
+.idea
+.vscode
+*.swp
+
+# Logs
+*.log
+logs
+
+# Documentação que não vai pra imagem
+README.md
+docs
+
+# Scripts que rodam via volume, não COPY
+scripts

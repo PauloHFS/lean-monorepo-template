@@ -1,0 +1,63 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+# ---- Ruff ----
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".venv", "migrations/versions"]
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, I: isort, B: bugbear, UP: pyupgrade, SIM: simplify
+select = ["E", "F", "I", "B", "UP", "SIM", "PL"]
+ignore = [
+    "E501",   # line length (handled by formatter)
+    "PLR0913",# many args
+    "PLR2004",# magic value — barulhento em testes
+    "B008",   # function call in default arg (FastAPI Depends)
+    "SIM108", # ternary em vez de if/else (estilo)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR2004", "S101", "B011"]
+"migrations/*" = ["E", "F", "I", "B", "UP", "PL"]  # gerado, não mexe
+# observability.py: imports lazy são propositais (OTel/Sentry só carrega se env setado)
+"app/core/observability.py" = ["PLC0415"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+# ---- mypy ----
+[tool.mypy]
+python_version = "3.12"
+strict = false
+ignore_missing_imports = true
+no_implicit_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = false  # ligado quando o time estiver confortável
+plugins = ["pydantic.mypy"]
+
+# SQLAlchemy async types são dinâmicos demais para mypy sem plugin externo.
+# Marcamos `ignore_errors = true` nos módulos que usam AsyncSession diretamente
+# (runner, deps, endpoints, cli). O resto do app fica strict o bastante.
+[[tool.mypy.overrides]]
+module = [
+    "app.jobs.runner",
+    "app.api.deps",
+    "app.api.v1.endpoints.*",
+    "app.cli",
+    "app.core.ratelimit",
+    "app.core.cache",
+    "app.core.totp",
+    "app.core.webauthn",
+]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false

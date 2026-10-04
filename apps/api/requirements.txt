@@ -1,0 +1,55 @@
+# =============================================================================
+# Backend (FastAPI + SQLAlchemy async + Alembic)
+# =============================================================================
+
+# --- Web ---
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+
+# --- Config / validação ---
+pydantic==2.10.3
+pydantic-settings==2.7.0
+email-validator==2.2.0
+
+# --- Banco (async) ---
+SQLAlchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+psycopg2-binary==2.9.10   # só para o Alembic rodar offline/env.py sync
+alembic==1.14.0
+
+# --- Auth / segurança ---
+bcrypt==4.2.1              # lib direto, sem passlib (incompatível c/ bcrypt>=4.1)
+itsdangerous==2.2.0        # assinatura do cookie de sessão
+
+# --- HTTP client (workers chamam webhooks) ---
+httpx==0.28.1
+
+# --- Email SMTP (Mailpit/dev, SES em prod) ---
+aiosmtplib==3.0.1
+
+# --- Logging / utilitários ---
+structlog==24.4.0
+tenacity==9.0.0            # retries com backoff
+
+# --- Testes (dev) ---
+pytest==8.3.4
+pytest-asyncio==0.24.0
+
+# --- Lint / type (dev) ---
+ruff==0.8.4
+mypy==1.13.0
+types-passlib==1.7.7.20240819
+
+# --- 2FA (TOTP + passkeys) ---
+pyotp==2.9.0
+py_webauthn==1.10.1
+
+# --- Observability (OpenTelemetry + Sentry opcional) ---
+opentelemetry-api==1.29.0
+opentelemetry-sdk==1.29.0
+opentelemetry-exporter-otlp-proto-grpc==1.29.0
+opentelemetry-instrumentation-fastapi==0.50b0
+opentelemetry-instrumentation-sqlalchemy==0.50b0
+opentelemetry-instrumentation-logging==0.50b0
+sentry-sdk[fastapi]==2.19.2
