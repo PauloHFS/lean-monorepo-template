@@ -250,6 +250,55 @@ vendor. Grafana stack é a stack open-source/self-hosted que o usuário pediu.
 
 ---
 
+## AD-012 · SQLAlchemy Core (`text()`) para queries, ORM só para schema
+
+**Status**: current.
+
+**Context**: SQLAlchemy oferece dois caminhos: ORM com `select(User).where(...)`
+(retornando objetos, com identity map, lazy loading) e Core com `text()`/`select()`
+(retornando `Row`/`dict`). Os modelos do projeto (`apps/api/app/db/models/`) usam
+`Mapped[]` + `DeclarativeBase` (ORM) — isso alimenta Alembic autogen, metadata
+introspection (FKs, indexes, tipos custom como `CITEXT`, `INET`, `JSONB`) e dá tipos
+Python para os serviços. **As queries em runtime, porém, são todas Core/raw.**
+
+Onde aparece:
+- `apps/api/app/core/cache.py` — `GET_SQL`, `UPSERT_SQL`, `DELETE_SQL` como
+  constantes módulo-level (`text()` na execução).
+- `apps/api/app/core/ratelimit.py` — `INSERT INTO rate_limits ... ON CONFLICT DO UPDATE`
+  para janela fixa de rate limit.
+- `apps/api/app/api/v1/endpoints/auth.py`, `users.py`, `twofa.py`, `deps.py`,
+  `health.py` — `text("SELECT/UPDATE/INSERT ...")` com `:bind` parameters.
+- `apps/api/migrations/versions/0001_initial_schema.py` — DDL puro (Alembic op)
+  + `SELECT cron.schedule(...)` para `pg_cron`.
+
+**Decision**:
+- **Modelos em ORM** (`Mapped[]`) — schema vive em Python, Alembic gera/revisão migrations,
+  tipos Postgres exóticos declarados uma vez.
+- **Queries em Core** (`text()`) — nenhuma rota passa por `session.query(Model)`;
+  o que vai pro banco é SQL explícito com bind params (`session.execute(text(SQL), params)`).
+- SQL dos hot paths de cache/ratelimit é exposto como constante módulo-level para
+  que testes afirmem na *string* (não no efeito colateral).
+
+**Consequences**:
+- `ON CONFLICT DO UPDATE`, `FOR UPDATE SKIP LOCKED`, `RETURNING`, `cron.schedule`,
+  CTE recursiva, operadores `JSONB`/`INET` — todos triviais em `text()`, todos
+  exigiriam workaround em ORM (e alguns ficariam ilegíveis via `insert(...).on_conflict_do_update(...)`).
+- Sem lazy loading → sem N+1 por acidente. Em hot path o custo é só do driver
+  (`psycopg`/`asyncpg`), sem hydration de objeto nem identity map.
+- Constantes SQL viram contrato — refactor de schema quebra `test_cache.py` /
+  `test_ratelimit.py` (`assert "INSERT INTO kv_cache" in UPSERT_SQL`), exatamente
+  onde deveria quebrar.
+- Resultados das queries são consumidos como `Row`/`dict` e convertidos para Pydantic
+  schemas (`UserOut(**dict(r))` em `users.py:list_users`). Sem hydration preguiçosa,
+  sem identity map, sem N+1.
+- Custo: SQL duplica entre modelo (`Mapped[...]`) e string SQL — schema drift é
+  pego por `just check-schema` (gera migration e diffa contra a última commitada).
+- Migração para outro ORM/SQL builder é custosa (muita string). Migração para
+  dialect diferente de Postgres é igualmente custosa — assumido pela decisão
+  Postgres-only em AD-001.
+
+---
+
 ## Future ADs (open questions)
 
 - _(none open — all shipped infra is documented above; product-level decisions like
