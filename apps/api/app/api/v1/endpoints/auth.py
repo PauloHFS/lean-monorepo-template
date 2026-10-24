@@ -73,6 +73,7 @@ async def register(payload: RegisterIn, session: DB) -> UserOut:
     return UserOut(**dict(row))
 
 
+# nosemgrep: fastapi-response-model-required — divida legado: login responde UserOut ou challenge de 2FA
 @router.post(
     "/login",
     dependencies=[Depends(rate_limit("auth.login", limit=5, window_s=60))],

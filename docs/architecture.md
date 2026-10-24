@@ -299,6 +299,45 @@ Onde aparece:
 
 ---
 
+## AD-013 · `uv` como gerenciador único de Python (pyproject + uv.lock)
+
+**Status**: current.
+
+**Context**: o backend era instalado com `pip install -r apps/api/requirements.txt`
+dentro de um venv criado à mão (`python -m venv .venv`). Isso dava pins diretos, mas
+não lockfile: as versões transitivas eram re-resolvidas a cada instalação, o build do
+Docker não tinha cache por dependência, o CI só cacheava o `requirements.txt` e não
+existia auditoria de dependências Python (o `npm audit` cobria só o frontend).
+`pip-audit` em modo `-r requirements.txt` ainda instala as dependências num venv
+temporário, o que exige `ensurepip` — inviável com o Python gerenciado pelo `uv`.
+
+**Decision**:
+- `uv` é o único gerenciador de Python do projeto.
+- Dependências de runtime ficam em `apps/api/pyproject.toml` (`[project]`, pins
+  exatos) e as de desenvolvimento em `[dependency-groups] dev` (pytest, pytest-asyncio,
+  ruff, pyright, bandit).
+- `apps/api/uv.lock` é versionado e é a fonte de verdade das versões resolvidas
+  (com hashes). `requirements.txt` foi removido.
+- Local: `uv sync` cria/atualiza `apps/api/.venv`; `uv run <cmd>` executa ferramentas.
+  CI: `uv sync --locked` (falha se o lock divergir do `pyproject.toml`).
+  Docker: binário do `uv` copiado da imagem `ghcr.io/astral-sh/uv` pinada; o venv
+  da imagem fica em `/opt/venv` (`UV_PROJECT_ENVIRONMENT`) para não ser encoberto
+  pelo bind mount de `apps/api` no compose.
+- Auditoria de dependências de produção: `just api-audit` roda
+  `uvx pip-audit@2.10.1 --path` contra um env prod-only (`.venv-audit`), sem
+  resolver/instalar nada — logo sem depender de `ensurepip`.
+
+**Consequences**:
+- Instalações reprodutíveis (lock com hashes) e cache de camadas por dependência
+  no Docker/CI.
+- O venv criado pelo `uv` não traz `pip`; ferramentas que dependem de pip rodam
+  via `uvx` (semgrep, pip-audit) ou `uv tool install`.
+- Atualização de segurança é bump em `pyproject.toml` + `uv lock` (ex.: aiosmtplib
+  3.0.1 → 5.1.3, python-multipart 0.0.30 → 0.0.31, pytest 8.3.4 → 9.0.3).
+- `uv` exige Python >= 3.10 no host; o projeto fixa 3.12 (`.python-version`).
+
+---
+
 ## Future ADs (open questions)
 
 - _(none open — all shipped infra is documented above; product-level decisions like

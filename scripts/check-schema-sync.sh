@@ -19,7 +19,7 @@ fi
 # Gera OpenAPI temporário e compara
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
-(cd apps/api && PYTHONPATH=apps/api .venv/bin/python -m app.cli dump-openapi) > "$TMP" 2>/dev/null
+(cd apps/api && uv run python -m app.cli dump-openapi) > "$TMP" 2>/dev/null
 
 if apps/web/node_modules/.bin/openapi-typescript "$TMP" -o /tmp/schema-drift.d.ts >/dev/null 2>&1; then
     if ! diff -q apps/web/src/api/schema.d.ts /tmp/schema-drift.d.ts >/dev/null 2>&1; then

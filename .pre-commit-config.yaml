@@ -1,5 +1,5 @@
 # https://pre-commit.com/
-# Instale com `pip install pre-commit` e rode `pre-commit install` uma vez.
+# Instale com `uv tool install pre-commit` e rode `pre-commit install` uma vez.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.8.4

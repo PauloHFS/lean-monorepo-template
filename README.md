@@ -109,6 +109,8 @@ just web-dev      # http://localhost:5173 (proxy /api -> :8000)
 Pra rodar api+worker+web paralelos num comando só: `just dev`.
 
 > `just` é o command runner — instale com `brew install just` (macOS) ou `cargo install just` (Linux).
+>
+> O Python do backend é gerenciado por `uv` — instale com `brew install uv` ou `curl -LsSf https://astral.sh/uv/install.sh | sh`. As deps ficam em `apps/api/pyproject.toml` (pins exatos) e `apps/api/uv.lock` é a fonte de verdade das versões.
 
 ---
 
@@ -286,7 +288,7 @@ O backend expõe o schema em `/api/openapi.json`. Para o front consumir esses ti
 ```bash
 just web-types
 # ou, à mão:
-cd apps/api && . .venv/bin/activate && python -m app.cli dump-openapi > openapi.json
+cd apps/api && uv run python -m app.cli dump-openapi > openapi.json
 cd apps/web && npm run gen:api    # openapi-typescript openapi.json → src/api/schema.d.ts
 ```
 
@@ -306,8 +308,10 @@ Sempre que você **adicionar/alterar** um endpoint ou Pydantic model, rode `just
 - **backend**: ruff + pyright + pytest
 - **frontend**: tsc + lint (Biome) + build
 - **compose**: valida que `docker-compose.yml` continua válido
+- **sast**: semgrep com as regras locais de `semgrep.yml`
+- **dependency-audit**: pip-audit (via `uvx`) nas deps de produção do backend
 
-Local: `just ci` roda os mesmos checks.
+Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, schema e compose).
 
 ---
 
@@ -316,9 +320,11 @@ Local: `just ci` roda os mesmos checks.
 - **Lint/typecheck**:
   - Backend: `ruff` (linter + formatter) + `pyright` (type checker). `just lint`, `just typecheck`.
   - Frontend: `biome` (linter + formatter + import sort, único tool). `just web-lint`, `just web-lint-fix`.
+  - **SAST**: `just bandit` (backend) + `just semgrep` (regras do projeto em `semgrep.yml`; requer `pipx install semgrep`).
   - Tudo roda em `just ci` (mesmo do GitHub Actions).
 - **Editor (VSCode)**: `.vscode/` tem settings compartilhadas (Biome como formatter default, Ruff no Python, Pyright, Tailwind, etc.), launch configs (API, worker, pytest) e tasks (`just init`, `just dev`, `just ci`, etc.). Abre o workspace e o VSCode oferece instalar as extensões recomendadas.
 - **Migrações**: `just api-revision "add foo"` → revisar antes de commitar.
+- **Dependências Python**: `uv` + `apps/api/uv.lock` (fonte de verdade); pins exatos em `apps/api/pyproject.toml`. `apps/api/requirements.txt` não existe mais. `just api-install` roda `uv sync`; `just api-audit` audita as deps de produção (pip-audit via `uvx`).
 - **Segredos**: NUNCA comitar `.env`. Em prod, monte via secret manager do orquestrador.
 - **Logs**: `structlog` JSON em prod, console em dev (stderr pra não poluir stdout).
 - **Tests**: `just test` roda a suite de 37 testes. Tudo que não precisa de DB.

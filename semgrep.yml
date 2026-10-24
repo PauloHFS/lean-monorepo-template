@@ -1,0 +1,85 @@
+# Regras SAST do projeto (Semgrep CE).
+#
+# Regras locais: rodam offline, sem token e sem enviar codigo para o registry.
+# Rodar: `just semgrep` (ou `semgrep scan --config semgrep.yml --error apps/api/app apps/web/src`)
+#
+# Cada regra aqui corresponde a uma regra do AGENTS.md. Ao criar, alterar ou
+# remover uma regra, atualize o AGENTS.md na mesma mudanca.
+rules:
+  - id: no-orm-query-in-routes
+    languages: [python]
+    severity: ERROR
+    message: >-
+      AD-012: queries de runtime usam SQLAlchemy Core (text() + bind params).
+      session.query()/select() nao entram em rotas nem em servicos.
+    pattern-either:
+      - pattern: $SESSION.query(...)
+      - pattern: $SESSION.execute(select(...))
+    paths:
+      include:
+        - "/apps/api/app/**"
+      exclude:
+        - "**/tests/**"
+
+  - id: no-dynamic-sql-text
+    languages: [python]
+    severity: ERROR
+    message: >-
+      SQL dinamico: text() deve receber literal (ou constante) e usar bind params
+      (:nome). Nunca concatene entrada do usuario no SQL.
+    patterns:
+      - pattern: text($ARG)
+      - metavariable-pattern:
+          metavariable: $ARG
+          patterns:
+            - pattern-either:
+                - pattern: f"..."
+                - pattern: $A + $B
+                - pattern: $A.format(...)
+                - pattern: $A % $B
+    paths:
+      include:
+        - "/apps/api/app/**"
+      exclude:
+        - "**/tests/**"
+
+  - id: fastapi-response-model-required
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Toda rota FastAPI declara response_model. Use response_model=None quando a
+      resposta nao tem corpo (204).
+    patterns:
+      - pattern: "@$R.$M(...)"
+      - metavariable-regex:
+          metavariable: $M
+          regex: "^(get|post|put|patch|delete|options|head)$"
+      - pattern-not: "@$R.$M(..., response_model=$X, ...)"
+    paths:
+      include:
+        - "/apps/api/app/api/v1/endpoints/**"
+
+  - id: no-wildcard-cors
+    languages: [python]
+    severity: ERROR
+    message: >-
+      CORS: nao libere origens curingas. Use settings.web_origin (producao) ou a
+      lista explicita de dev.
+    pattern-regex: |-
+      allow_origins\s*=\s*\[\s*["']\*["']\s*\]
+    paths:
+      include:
+        - "/apps/api/app/**"
+
+  - id: ts-no-explicit-any
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      TypeScript strict: use unknown com narrowing, nunca any.
+    pattern-regex: |-
+      (:\s*any\b)|(\bas\s+any\b)|(<any>)|(\bany\[\])|([,<|]\s*any\b)|(\=\s*any\b)
+    paths:
+      include:
+        - "/apps/web/src/**"
+      exclude:
+        - "/apps/web/src/api/schema.d.ts"

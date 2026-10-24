@@ -30,25 +30,25 @@ down-v:
 logs:
     docker compose --profile app logs -f --tail=100
 
-# Instala deps Python em venv local
+# Instala deps Python (uv sync a partir de pyproject.toml + uv.lock)
 api-install:
-    cd apps/api && python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+    cd apps/api && uv sync
 
 # Roda migrations (alembic upgrade head)
 api-migrate:
-    cd apps/api && . .venv/bin/activate && alembic upgrade head
+    cd apps/api && uv run alembic upgrade head
 
 # Cria nova migration: `just api-revision "add foo"`
 api-revision message:
-    cd apps/api && . .venv/bin/activate && alembic revision --autogenerate -m "{{message}}"
+    cd apps/api && uv run alembic revision --autogenerate -m "{{message}}"
 
 # Sobe uvicorn em modo dev
 api-run:
-    cd apps/api && . .venv/bin/activate && uvicorn app.main:app --reload --port $API_PORT
+    cd apps/api && uv run uvicorn app.main:app --reload --port $API_PORT
 
 # Sobe worker em foreground
 worker-run:
-    cd apps/api && . .venv/bin/activate && python -m app.jobs.runner
+    cd apps/api && uv run python -m app.jobs.runner
 
 # Sobe api + worker + front em paralelo. Ctrl-C derruba tudo.
 dev:
@@ -56,37 +56,48 @@ dev:
     @echo "worker -> rodando em foreground"
     @echo "web    -> http://localhost:5173"
     @echo "Ctrl-C para parar."
-    cd apps/api && . .venv/bin/activate && uvicorn app.main:app --reload --port $API_PORT &
-    cd apps/api && . .venv/bin/activate && python -m app.jobs.runner &
+    cd apps/api && uv run uvicorn app.main:app --reload --port $API_PORT &
+    cd apps/api && uv run python -m app.jobs.runner &
     cd apps/web && npm run dev
     @wait
 
 # Roda testes unitários
 test:
-    cd apps/api && . .venv/bin/activate && pytest -q
+    cd apps/api && uv run pytest -q
 
 # Lint do backend
 lint:
-    cd apps/api && . .venv/bin/activate && ruff check .
+    cd apps/api && uv run ruff check .
 
 # Typecheck do backend (pyright)
 typecheck:
-    cd apps/api && . .venv/bin/activate && pyright app
+    cd apps/api && uv run pyright app
 
 # SAST de seguranca (bandit)
 bandit:
-    cd apps/api && . .venv/bin/activate && bandit -r app --severity-level medium
+    cd apps/api && uv run bandit -r app --severity-level medium
 
-# Roda tudo que o CI roda: testes + lint + typecheck + bandit do backend
-# + typecheck + lint + audit do front + sync do schema + valida o docker compose
+# Scan SAST com as regras do projeto (semgrep.yml); requer `pipx install semgrep`
+semgrep:
+    SEMGREP_SEND_METRICS=off semgrep scan --config semgrep.yml --error apps/api/app apps/web/src
+
+# Audit de dependencias de producao do backend (pip-audit via uvx)
+api-audit:
+    cd apps/api && UV_PROJECT_ENVIRONMENT=.venv-audit uv sync --frozen --no-dev
+    cd apps/api && uvx pip-audit@2.10.1 --path .venv-audit/lib/python3.12/site-packages
+
+# Roda tudo que o CI roda: tests/lint/typecheck/bandit/semgrep do back
+# + web typecheck/lint/audit + audit do back + schema + valida o docker compose
 ci:
     @echo "==> tests"     && just test
     @echo "==> lint"      && just lint
     @echo "==> pyright"   && just typecheck
     @echo "==> bandit"    && just bandit
+    @echo "==> semgrep"  && just semgrep
     @echo "==> web tsc"   && just web-typecheck
     @echo "==> web lint"  && just web-lint
     @echo "==> web audit" && just web-audit
+    @echo "==> py audit"  && just api-audit
     @echo "==> schema"    && just check-schema
     @echo "==> compose"   && just validate-compose
 
@@ -128,7 +139,7 @@ web-build:
 
 # Regenera src/api/schema.d.ts a partir do OpenAPI do backend
 web-types:
-    cd apps/api && . .venv/bin/activate && python -m app.cli dump-openapi > openapi.json
+    cd apps/api && uv run python -m app.cli dump-openapi > openapi.json
     cd apps/web && npm run gen:api
 
 # Verifica se schema.d.ts está em sync (roda automaticamente no pre-commit)
@@ -170,4 +181,4 @@ clean:
     find . -type d -name "__pycache__" -prune -exec rm -rf {} +
     find . -type d -name ".pytest_cache" -prune -exec rm -rf {} +
     find . -type d -name "node_modules" -prune -exec rm -rf {} +
-    rm -rf apps/web/dist apps/api/.venv apps/api/openapi.json
+    rm -rf apps/web/dist apps/api/.venv apps/api/.venv-audit apps/api/openapi.json

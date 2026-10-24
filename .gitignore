@@ -16,6 +16,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 apps/api/.venv/
+apps/api/.venv-audit/
 apps/api/dist/
 apps/api/build/
 
