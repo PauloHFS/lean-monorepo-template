@@ -49,6 +49,3 @@ logs
 # Documentação que não vai pra imagem
 README.md
 docs
-
-# Scripts que rodam via volume, não COPY
-scripts

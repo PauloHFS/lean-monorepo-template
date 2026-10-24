@@ -7,8 +7,10 @@
 # ---- Stage 1: front ---------------------------------------------------------
 FROM node:20-alpine AS build-web
 WORKDIR /web
-COPY apps/web/package.json ./
-RUN npm install --no-audit --no-fund
+# browsers do Playwright nao sao necessarios no build do Vite
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+COPY apps/web/package.json apps/web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY apps/web ./
 RUN npm run build
 

@@ -210,7 +210,7 @@ async def passkey_register_options(user: CurrentUser, session: DB) -> PasskeyOpt
     return PasskeyOptionsOut(options=options, challenge=challenge_b64)
 
 
-@router.post("/passkey/register/verify", status_code=204)
+@router.post("/passkey/register/verify", status_code=204, response_model=None)
 async def passkey_register_verify(payload: PasskeyRegisterIn, user: CurrentUser, session: DB) -> None:
     """Verifica attestation e persiste a credencial."""
     info = wa.complete_registration(

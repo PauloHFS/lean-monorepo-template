@@ -40,13 +40,14 @@ tenacity==9.0.0            # retries com backoff
 pytest==8.3.4
 pytest-asyncio==0.24.0
 
-# --- Lint / type (dev) ---
+# --- Lint / type / SAST (dev) ---
 ruff==0.8.4
 pyright==1.1.414
+bandit==1.8.6
 
 # --- 2FA (TOTP + passkeys) ---
 pyotp==2.9.0
-py_webauthn==1.10.1
+py_webauthn==0.0.6
 
 # --- Observability (OpenTelemetry + Sentry opcional) ---
 opentelemetry-api==1.29.0

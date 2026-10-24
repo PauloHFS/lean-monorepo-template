@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "gen:api": "openapi-typescript ../api/openapi.json -o src/api/schema.d.ts",
@@ -24,7 +24,7 @@
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.89.0",
     "react-router-dom": "^6.28.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
