@@ -73,15 +73,22 @@ lint:
 typecheck:
     cd apps/api && . .venv/bin/activate && pyright app
 
-# Roda tudo que o CI roda: testes + lint + typecheck do backend
-# + typecheck + lint do front + valida o docker compose
+# SAST de seguranca (bandit)
+bandit:
+    cd apps/api && . .venv/bin/activate && bandit -r app --severity-level medium
+
+# Roda tudo que o CI roda: testes + lint + typecheck + bandit do backend
+# + typecheck + lint + audit do front + sync do schema + valida o docker compose
 ci:
-    @echo "==> tests"    && just test
-    @echo "==> lint"     && just lint
-    @echo "==> pyright"  && just typecheck
-    @echo "==> web tsc"  && just web-typecheck
-    @echo "==> web lint" && just web-lint
-    @echo "==> compose"  && just validate-compose
+    @echo "==> tests"     && just test
+    @echo "==> lint"      && just lint
+    @echo "==> pyright"   && just typecheck
+    @echo "==> bandit"    && just bandit
+    @echo "==> web tsc"   && just web-typecheck
+    @echo "==> web lint"  && just web-lint
+    @echo "==> web audit" && just web-audit
+    @echo "==> schema"    && just check-schema
+    @echo "==> compose"   && just validate-compose
 
 # Sobe a stack + Grafana/Tempo/Prometheus (profile observability)
 up-obs:
@@ -94,6 +101,10 @@ web-typecheck:
 # Lint do frontend (Biome)
 web-lint:
     cd apps/web && npm run lint
+
+# Audit de dependencias de producao do front
+web-audit:
+    cd apps/web && npm audit --omit=dev --audit-level=high
 
 # Lint + auto-fix no frontend
 web-lint-fix:
