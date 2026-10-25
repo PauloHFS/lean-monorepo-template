@@ -5,6 +5,7 @@ Uso:
     python -m app.cli seed                       # cria admin@example.com (primeiro dev)
     python -m app.cli create-user email@x.com senha123 "Nome"
     python -m app.cli enqueue-job email.send '{"to":"a@b.com"}'
+    python -m app.cli example-job
     python -m app.cli db-status
 """
 
@@ -31,6 +32,13 @@ log = get_logger("cli")
 
 _DEFAULT_SEED_EMAIL = "admin@example.com"
 _DEFAULT_SEED_NAME = "Admin"
+
+# SQL literal: valores entram só por bind params (AD-012 / anti-SQLi).
+EXAMPLE_JOB_SQL = """
+    INSERT INTO background_jobs (queue, kind, payload, status, max_attempts)
+    VALUES (:queue, :kind, CAST(:payload AS jsonb), :status, :max_attempts)
+    RETURNING id
+"""
 
 
 # -----------------------------------------------------------------------------
@@ -132,6 +140,43 @@ async def _enqueue_job(kind: str, payload_json: str) -> None:
     print(f"queued: id={job_id} task={kind}")
 
 
+def example_job_payload() -> dict[str, Any]:
+    """Payload de exemplo do job legado (puro: testável sem DB)."""
+    return {
+        "to": "someone@example.com",
+        "subject": "Exemplo de job",
+        "text": "Payload de exemplo.",
+    }
+
+
+async def _insert_example_job() -> None:
+    """Insere uma linha de exemplo em `background_jobs` (tabela legada)."""
+    async with SessionLocal() as session, session.begin():
+        row = (
+            (
+                await session.execute(
+                    text(EXAMPLE_JOB_SQL),
+                    {
+                        "queue": "default",
+                        "kind": "example.task",
+                        "payload": json.dumps(example_job_payload()),
+                        "status": "pending",
+                        "max_attempts": 5,
+                    },
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if row is None:
+        raise RuntimeError("INSERT de job de exemplo não retornou linha")
+    print(f"example job: id={row['id']} kind=example.task status=pending")
+    print(
+        "aviso: nenhum worker consome background_jobs hoje (a fila ativa é a do "
+        "Procrastinate); a linha fica como template para um consumidor futuro."
+    )
+
+
 async def _db_status() -> None:
     async with SessionLocal() as session:
         db_ok = (await session.execute(text("SELECT 1"))).scalar_one() == 1
@@ -183,6 +228,11 @@ async def cmd_enqueue_job(args: list[str]) -> int:
     return 0
 
 
+async def cmd_example_job(_args: list[str]) -> int:
+    await _insert_example_job()
+    return 0
+
+
 async def cmd_db_status(_args: list[str]) -> int:
     await _db_status()
     return 0
@@ -199,6 +249,7 @@ _REGISTRY: dict[str, AsyncCmd] = {
     "seed": cmd_seed,
     "create-user": cmd_create_user,
     "enqueue-job": cmd_enqueue_job,
+    "example-job": cmd_example_job,
     "db-status": cmd_db_status,
 }
 
@@ -214,6 +265,7 @@ def usage() -> None:
         "  python -m app.cli seed\n"
         "  python -m app.cli create-user <email> <password> [name]\n"
         "  python -m app.cli enqueue-job <kind> [payload-json]\n"
+        "  python -m app.cli example-job\n"
         "  python -m app.cli db-status\n"
     )
 

@@ -1,13 +1,17 @@
-"""Tests das tasks de jobs (Procrastinate)."""
+"""Tests das tasks de jobs (Procrastinate) e do job de exemplo legado."""
 
 from __future__ import annotations
+
+import json
 
 import procrastinate
 import pytest
 from procrastinate import testing
 from pydantic import ValidationError
 
+from app import cli
 from app.api.v1.endpoints.users import EnqueueEmailOut
+from app.cli import EXAMPLE_JOB_SQL, example_job_payload
 from app.jobs.app import app
 from app.jobs.tasks.email import send_email
 
@@ -42,3 +46,32 @@ def test_enqueue_email_out_job_id_is_int() -> None:
     assert out.job_id == 42
     with pytest.raises(ValidationError):
         EnqueueEmailOut(job_id="not-an-int", status="queued")  # type: ignore[arg-type]
+
+
+def test_example_job_payload_has_expected_keys_and_is_json_serializable() -> None:
+    payload = example_job_payload()
+    assert set(payload) == {"to", "subject", "text"}
+    assert json.loads(json.dumps(payload)) == payload
+
+
+def test_example_job_payload_is_a_fresh_copy() -> None:
+    first = example_job_payload()
+    first["to"] = "mutated@example.com"
+    assert example_job_payload()["to"] == "someone@example.com"
+
+
+def test_example_job_command_is_registered() -> None:
+    registry: dict[str, object] = vars(cli)["_REGISTRY"]
+    assert "example-job" in registry
+
+
+def test_example_job_sql_is_literal_and_uses_bind_params() -> None:
+    """Valores (inclusive o payload) vão por bind param, nunca interpolados."""
+    assert "INSERT INTO background_jobs" in EXAMPLE_JOB_SQL
+    for param in (":queue", ":kind", ":payload", ":status", ":max_attempts"):
+        assert param in EXAMPLE_JOB_SQL
+    assert "CAST(:payload AS jsonb)" in EXAMPLE_JOB_SQL
+    # Nenhum valor concreto / f-string vazou para o SQL.
+    assert "example.task" not in EXAMPLE_JOB_SQL
+    assert "someone@example.com" not in EXAMPLE_JOB_SQL
+    assert "{" not in EXAMPLE_JOB_SQL
