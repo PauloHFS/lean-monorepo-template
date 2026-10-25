@@ -29,7 +29,9 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 
 ### Tipagem e contratos
 
-- Funções Python novas ou alteradas devem ter type hints completos. Não amplie a lista de exclusões do Pyright e não adicione `type: ignore` sem motivo explícito.
+- O backend roda Pyright em `strict` (`apps/api/pyrightconfig.json`, sem lista de `ignore`). Todo código novo passa em `uv run pyright app tests` com 0 erros; não reintroduza exclusões de arquivo nem `# type: ignore` sem motivo explícito.
+- `AsyncSession.execute` é corrotina: isole o `await` (`(await session.execute(...)).mappings().first()`) antes de encadear `.mappings()`/`.first()`/`.scalar*()`. Encadear no `await` quebra em runtime.
+- DML precisa de `cast(CursorResult[Any], await session.execute(...))` para ler `.rowcount`; libs sem stubs (`py-webauthn`, instrumentação OTel) se normalizam na fronteira com `cast`, sem espalhar `Unknown` pelo app.
 - TypeScript deve permanecer em modo strict e não usar `any`; prefira `unknown` com narrowing. O aviso do Biome sobre `any` não substitui essa regra.
 - Toda rota nova deve declarar modelos Pydantic de entrada, `response_model` e tipos explícitos para respostas.
 - `apps/web/src/api/schema.d.ts` é gerado. Nunca o edite manualmente; após mudar schemas ou rotas, rode `just web-types` e versione o resultado.
@@ -41,6 +43,20 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - Nunca concatene entrada do usuário em SQL. Isso evita SQL Injection mesmo nos pontos de acesso SQL explícito.
 - Modelos ORM (`Mapped[]`) servem ao schema e ao Alembic; queries de runtime servem ao Core.
 - Gere migrations com `just api-revision`, revise o resultado e não edite uma migration já aplicada.
+
+### Testes
+
+- Testes unitários não tocam Postgres (AD-008): o runner SQL é testado como texto, não executado.
+- Validadores, criptografia e rate limiter têm testes de propriedades com Hypothesis (`apps/api/tests/test_properties_*.py`).
+- bcrypt custa ~100 ms por hash: use `@settings(deadline=None, max_examples=...)` ou o Hypothesis vira fábrica de flakes.
+- Não duplique em Python a semântica que mora no SQL; extraia só a parte pura (chave, decisão) e teste isso.
+
+### Observabilidade e tracing
+
+- Tracing é OpenTelemetry com propagação W3C (`traceparent`); a configuração vem de `Settings` (`otel_*`, `sentry_*`), nunca de `os.environ` lido no import.
+- Span manual existe nas fronteiras: enqueue de job e worker. O contexto de trace viaja no payload do job; jobs antigos sem `trace_context` continuam funcionando.
+- Logs carregam `trace_id`/`span_id` do span corrente. Span inválido vira `None`, não string de zeros.
+- `provider.shutdown()` no shutdown do app: sem flush, os spans morrem no container.
 
 ### Segurança
 

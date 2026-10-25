@@ -338,6 +338,114 @@ temporário, o que exige `ensurepip` — inviável com o Python gerenciado pelo 
 
 ---
 
+## AD-014 · Tipagem estrita no backend (Pyright strict, sem lista de exclusões)
+
+**Status**: current.
+
+**Context**: `apps/api/pyrightconfig.json` rodava Pyright em `typeCheckingMode: "basic"`
+com uma lista `ignore` que cobria endpoints, deps, cli, `core/*` e `tests/**` — a maior
+parte do app não era checada. No modo `basic`, o padrão do app
+`await session.execute(text(SQL), params).mappings().first()` passava sem aviso, mas
+`AsyncSession.execute` é função corrotina: o `await` se aplica ao resultado inteiro e
+`.mappings()` é chamado sobre o corrotina → `AttributeError: 'coroutine' object has no
+attribute 'mappings'` em runtime. O padrão estava em 14 sites (cache, ratelimit, deps,
+auth, users, twofa, cli) — ou seja, **toda query do app quebrava em produção**.
+
+**Decision**:
+- `typeCheckingMode: "strict"` com `include: ["app", "tests"]` e **sem** lista de
+  exclusões. Única relaxação: `reportMissingTypeStubs: "warning"` (libs de terceiro
+  sem stubs, ex.: `py-webauthn`).
+- Invariante de runtime: isolar o `await` antes de encadear — `(await session.execute(...)).mappings().first()`.
+- Fronteiras sem stub (`py-webauthn`, `pyotp`, `bcrypt`, instrumentação OTel) são
+  normalizadas com `cast`/wrapper local, não com exclusão de arquivo nem `# type: ignore`
+  em massa.
+- `just typecheck` e o CI rodam `uv run pyright app tests` com 0 erros.
+
+**Consequences**:
+- O bug de `await` foi corrigido nos 14 sites e agora é erro de tipo, não de produção.
+- `reportPrivateUsage` deixa de ser ignorada: código que usa API privada de lib precisa
+  de wrapper público ou `getattr` explícito.
+- Códigos novos em `app/` e `tests/` precisam de anotações completas; dívida de tipos
+  vira falha de CI em vez de descoberta tardia.
+
+---
+
+## AD-015 · Testes de propriedades (Hypothesis) para validadores, cripto e rate limiter
+
+**Status**: current.
+
+**Context**: a suíte tinha 37 testes de caso fixo (`assert` direto), sem Postgres
+(AD-008). Validadores Pydantic, criptografia (bcrypt/Fernet/TOTP) e rate limiter tinham
+invariantes — round-trip, monotonicidade, limites de threshold — que nenhum teste
+expressava.
+
+**Decision**:
+- `hypothesis` (dev group) cobre as propriedades em `tests/test_properties_*.py`:
+  - **cripto**: round-trip bcrypt, hash ≠ senha, prefixo `$2b$12$`, senha errada → False,
+    truncamento em 72 bytes, `ValueError` se e somente se `len < password_min_length`,
+    sha256 do token de sessão (64 hex, determinístico), token URL-safe e único,
+    TTL exato, round-trip Fernet, recovery codes.
+  - **validadores**: `RegisterIn`, `LoginIn`, `EmailStr`, `UserOut`, `TotpConfirmIn`,
+    `EnqueueEmailIn` — documentando a dívida atual sem alterar os schemas.
+  - **rate limiter**: helpers puros `build_key(ip, endpoint)` e `is_blocked(count, limit)`
+    extraídos de `app/core/ratelimit.py`, mais as invariantes do texto de `HIT_SQL`.
+- `@settings(max_examples=..., deadline=None)` em tudo que usa bcrypt: um hash custa
+  ~100 ms e o deadline padrão (200 ms) vira flake.
+- A semântica de contagem/janela **continua no SQL**: extrai-se só a parte pura
+  (chave e decisão), sem duplicar o algoritmo em Python.
+
+**Consequences**:
+- Invariantes ficam declaradas e verificadas por fuzzing, inclusive nas bordas
+  (limiar `limit`/`limit+1`, senhas multibyte, tokens).
+- Schemas com regras ausentes (`LoginIn` sem `min_length`, `TotpConfirmIn` sem padrão
+  de 6 dígitos, `EnqueueEmailIn` sem `max_length`) ficam registrados como dívida
+  nos TODOs dos testes — a correção muda contrato e merece decisão própria.
+- AD-008 preservado: nenhum teste toca Postgres.
+
+---
+
+## AD-016 · Tracing distribuído consolidado (config, resource, sampler, log↔span, filas)
+
+**Status**: current.
+
+**Context**: AD-011 ativava o OTel, mas o app lia `os.environ` **no import** do módulo
+de observabilidade (configuração não testável), o resource tinha só `service.name`, não
+havia sampler explícito, os logs não carregavam `trace_id`, o job de email enfileirado
+perdia o trace (a fila não carregava contexto), o provider nunca era finalizado (spans
+morriam no container) e a resposta não trazia identificador de trace.
+
+**Decision**:
+- Configuração vem de `Settings` (`otel_exporter_otlp_endpoint`, `otel_traces_sampler`,
+  `otel_sample_ratio` — aceita `OTEL_TRACES_SAMPLER_ARG` —, `sentry_dsn`,
+  `sentry_traces_sample_rate`), **todos com default**: sem endpoint/DSN o tracing é
+  no-op.
+- `Resource` com `service.name`, `service.version`, `deployment.environment` e
+  `service.namespace`; sampler explícito (`always_on`, `always_off`, `traceidratio`,
+  `parentbased_traceidratio` — default parentbased com ratio).
+- Propagador W3C composto (`tracecontext` + `baggage`) instalado sempre, mesmo sem
+  exporter, para que `traceparent` de entrada alimente logs e spans manuais.
+- Correlação log↔span: processor structlog `add_trace_context` anexa `trace_id`/`span_id`
+  (hex) do span corrente — `None` quando não há span válido, nunca a string de zeros.
+- Propagação para a fila: `inject_trace_context` grava o contexto W3C no payload do
+  job; `extract_trace_context` o recupera no worker (job antigo sem `trace_context`
+  continua funcionando, virando raiz). Spans manuais existem nas fronteiras
+  (`email.enqueue` no endpoint, `email.send` no worker).
+- `shutdown_tracing()` no `finally` do lifespan da API e no fim do runner do worker
+  (flush + shutdown do provider).
+- `X-Trace-Id` na resposta via `TraceIdMiddleware`.
+
+**Consequences**:
+- Um request e o job de email correspondente ficam no mesmo trace; os logs do
+  caminho carregam `trace_id`/`span_id`.
+- Sampling e roteamento de vendor continuam sendo decisão do operador (env vars);
+  o app permanece vendor-agnostic (AD-011).
+- Sem `OTEL_EXPORTER_OTLP_ENDPOINT`, o custo é praticamente zero.
+- known gap: o endpoint grava em `background_jobs`, mas o worker Procrastinate consome
+  a fila própria dele — a ponte entre as duas tabelas é pré-existente e segue fora do
+  escopo. O payload já carrega `trace_context`, pronto para a ligação.
+
+---
+
 ## Future ADs (open questions)
 
 - _(none open — all shipped infra is documented above; product-level decisions like
