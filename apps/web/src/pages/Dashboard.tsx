@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router'
 
 import { ApiError } from '../api/client'
 import { HealthApi, UsersApi } from '../api/endpoints'
