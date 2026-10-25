@@ -79,7 +79,7 @@ bandit:
 
 # Scan SAST com as regras do projeto (semgrep.yml); requer `pipx install semgrep`
 semgrep:
-    SEMGREP_SEND_METRICS=off semgrep scan --config semgrep.yml --error apps/api/app apps/web/src
+    SEMGREP_SEND_METRICS=off semgrep scan --config semgrep.yml --error apps/api/app apps/web/src apps/web/e2e
 
 # Audit de dependencias de producao do backend (pip-audit via uvx)
 api-audit:
@@ -97,6 +97,7 @@ ci:
     @echo "==> web tsc"   && just web-typecheck
     @echo "==> web lint"  && just web-lint
     @echo "==> web audit" && just web-audit
+    @echo "==> e2e"       && just e2e-mock
     @echo "==> py audit"  && just api-audit
     @echo "==> schema"    && just check-schema
     @echo "==> compose"   && just validate-compose
@@ -146,15 +147,18 @@ web-types:
 check-schema:
     bash scripts/check-schema-sync.sh
 
-# E2E (Playwright) contra a stack local
+# E2E (Playwright). Sem API/DB no ar, os testes que dependem do backend sao pulados.
 e2e:
     cd apps/web && npm run e2e
 
-# Sobe stack + roda E2E (sobe e desce o compose)
+# E2E so com os specs mockados (nao precisa de API/DB) — e o que o CI roda
+e2e-mock:
+    cd apps/web && npm run e2e -- e2e/smoke.spec.ts e2e/auth-failure.spec.ts e2e/async-flow.spec.ts
+
+# Sobe a stack e roda E2E contra a SPA servida pela API em :8000 (sobe e desce o compose)
 e2e-full:
-    docker compose --profile app up -d
-    @just e2e
-    @docker compose --profile app down
+    docker compose --profile app up -d --build
+    cd apps/web && E2E_BASE_URL=http://localhost:8000 npm run e2e; code=$$?; docker compose --profile app down; exit $$code
 
 # Abre a web UI do Mailpit (precisa do compose up)
 mail:
