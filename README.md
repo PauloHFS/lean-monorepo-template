@@ -4,7 +4,7 @@ Template enxuto de monoprojeto com:
 
 - **Backend** Python 3.12 + FastAPI + SQLAlchemy 2.x async + Alembic
 - **Worker** [Procrastinate](https://procrastinate.readthedocs.io/) 3.10.0 (Postgres-only, mesma imagem da API)
-- **Frontend** React 18 + TypeScript + Vite + Tailwind + React Router 7
+- **Frontend** React 18 + TypeScript + Vite 8 + Tailwind + React Router 7
 - **Tipos ponta a ponta** via `openapi-typescript` (regenerados com `just web-types`)
 - **2FA** opcional: TOTP (Google Authenticator) + passkey (WebAuthn/Touch ID)
 - **Rate limit** em `/auth/login` e `/auth/register` (Postgres, sem Redis)
@@ -33,7 +33,7 @@ Template enxuto de monoprojeto com:
 │   │   │   │                 observability, totp, webauthn, middleware
 │   │   │   ├── db/           SQLAlchemy (base, session, models)
 │   │   │   ├── jobs/         app.py (Procrastinate) + runner.py (entrypoint) + tasks/
-│   │   │   ├── cli.py        dump-openapi, seed, create-user, enqueue-job, db-status
+│   │   │   ├── cli.py        dump-openapi, seed, create-user, enqueue-job, example-job, db-status
 │   │   │   └── main.py       FastAPI app
 │   │   ├── migrations/       alembic (1 arquivo: 0001_initial_schema.py)
 │   │   └── tests/            pytest (114 testes)
@@ -111,6 +111,8 @@ Pra rodar api+worker+web paralelos num comando só: `just dev`.
 > `just` é o command runner — instale com `brew install just` (macOS) ou `cargo install just` (Linux).
 >
 > O Python do backend é gerenciado por `uv` — instale com `brew install uv` ou `curl -LsSf https://astral.sh/uv/install.sh | sh`. As deps ficam em `apps/api/pyproject.toml` (pins exatos) e `apps/api/uv.lock` é a fonte de verdade das versões.
+>
+> O front usa **Node 24** (o Node 20 está EOL e o Vite 8 exige `^20.19 || >=22.12`).
 
 ---
 

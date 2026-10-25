@@ -731,6 +731,48 @@ CVE-2026-53666): o `npm audit --omit=dev` acusava 2 moderate e o fix exigia v7.
 
 ---
 
+## AD-023 · Vite 8 (Rolldown) e Node 24 no front
+
+**Status**: current.
+
+**Context**: o Vite 5 carregava o advisory GHSA-4w7w-66w2-5vf9 (path traversal em
+`.map` dos deps otimizados, dev server) — **todas as 5.x são afetadas e a linha 5
+não recebeu patch** (EOL): o fix existe só a partir de 6.4.2 / 7.3.2 / 8.0.5. O
+Node usado no build e no CI era o 20, **EOL desde 2026-04-30**. O `npm audit
+--omit=dev --audit-level=high` (gate de produção) continuava em 0, então a dívida
+era de dev server e de runtime sem patch, não de bundle.
+
+**Decision**:
+- **Vite 8.3.5** (Rolldown + Oxc no lugar de Rollup + esbuild; CSS minificado por
+  Lightning CSS) e **`@vitejs/plugin-react` 6.1.2** — o 4.x não aceita Vite 8 no
+  peer range. O `vite.config.ts` **não mudou**: o repo não usa `define`,
+  `esbuild`, `rollupOptions`, `base` nem `assetsDir`, `server.proxy` não mudou
+  entre 6/7/8 e `build.target: 'es2022'` está pinado (imune à mudança de default).
+  Tailwind 3 continua compatível (é plugin PostCSS, não plugin Vite).
+- **Node 24** (Active LTS) no Dockerfile (`node:24-alpine`) e nos 3 jobs do CI que
+  rodam Node (`frontend`, `e2e`, `schema-sync`). O Node 26 ainda é "Current" e
+  entra em LTS em 2026-10-28 — não foi pinado. O Vite 8 exige
+  `^20.19.0 || >=22.12.0`.
+
+**Consequences**:
+- O `npm audit --omit=dev --audit-level=high` continua em **0** e o advisory do Vite
+  5 saiu do alcance; o audit completo caiu de 5 para 3 moderate, **todas em
+  devDependencies** e todas na cadeia do Tailwind 3
+  (`postcss-selector-parser` → `postcss-nested` → `tailwindcss`): o fix exige
+  Tailwind 4 (breaking), fora do escopo.
+- O build ficou mais rápido (220 → 155 módulos, 4,78 s → 916 ms) e o bundle
+  encolheu (JS 336,35 → 331,14 kB; CSS 11,83 → 11,67 kB); nenhum chunk novo.
+- O risco de interop CJS unificado do Vite 8 (`import QRCode from 'qrcode'` em
+  `Security.tsx`) **não se materializou**: build sem warning e o `default` import
+  foi validado em Chromium headless. `legacy.inconsistentCjsInterop` não é
+  necessário.
+- Node <20.19/22.12 deixa de servir: `apps/web/package.json` não declara
+  `engines`, então o erro aparece na install, não antes.
+- A versão do Node aparece em três lugares (Dockerfile + 3 jobs do CI) — sem
+  fonte única dentro do repo (a tag da imagem Docker é por definição externa).
+
+---
+
 ## Future ADs (open questions)
 
 - _(none open — all shipped infra is documented above; product-level decisions like

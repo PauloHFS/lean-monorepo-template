@@ -12,7 +12,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 ## 2. Arquitetura
 
 - **Backend (`/apps/api`)**: Python 3.12 gerenciado por `uv`, FastAPI, Pydantic v2, SQLAlchemy 2.0 assíncrono/Core, Alembic, Procrastinate e PostgreSQL.
-- **Frontend (`/apps/web`)**: TypeScript strict, React 18, Vite, Tailwind CSS, Biome e tipos gerados do OpenAPI.
+- **Frontend (`/apps/web`)**: TypeScript strict, React 18, Vite 8 (Rolldown/Oxc), Tailwind CSS, Biome e tipos gerados do OpenAPI. Node 24 é o piso do front (o Node 20 está EOL e o Vite 8 exige `^20.19 || >=22.12`).
 - **Princípio arquitetural**: PostgreSQL é a única fonte de estado do backend. Cache, filas, sessões e rate limiting pertencem ao PostgreSQL; não introduza Redis, Celery ou outro serviço sem uma nova ADR.
 - **Princípio de interface**: toda rota nova possui contrato Pydantic de entrada e saída; o frontend consome os tipos gerados pelo OpenAPI.
 
@@ -74,7 +74,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 ### Filas e jobs
 
 - Jobs entram pela fila do Procrastinate (`send_email.defer_async(...)`), a mesma task que o worker executa. O `trace_context` viaja no payload (`inject_trace_context`).
-- A tabela `background_jobs` é legada e **ninguém consome**: não grave enfileiramentos nela.
+- A tabela `background_jobs` é legada e **ninguém consome**: não grave enfileiramentos de produção nela. O comando `python -m app.cli example-job` insere uma linha-template (`kind='example.task'`) para um consumidor futuro — é referência de formato, não fila.
 - `job_id` é o id do Procrastinate (inteiro), não um UUID.
 
 ### Testes
