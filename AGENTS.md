@@ -42,6 +42,14 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - `scripts/check-schema-sync.sh` é o gate de contrato: compara o `schema.d.ts` versionado com o OpenAPI atual e falha se alguma **resposta de rota** virar `Record<string, never>`/`unknown`. Rode `just web-types && just check-schema` depois de mexer em rotas ou schemas.
 - WebAuthn: as options chegam em base64url; converta para `BufferSource` com `src/lib/webauthn.ts` (`toRegistrationOptions`/`toAuthenticationOptions`) antes de `navigator.credentials`.
 
+### Validação de entrada (schemas)
+
+- Todo schema de entrada declara suas constraints no Pydantic v2 (`Field(min_length=..., max_length=..., pattern=...)`); paginação usa `Query(ge=..., le=...)`. A fronteira é o backend — o Zod do front é conveniência, não garantia.
+- `RegisterIn.password` usa `settings.password_min_length` como fonte única do mínimo, com `max_length=72` (o bcrypt trunca em 72 **bytes**).
+- `LoginIn.password` fica **sem** `max_length`: o truncamento do bcrypt acontece nos dois lados, então limitar o login quebraria usuários legados com senha >72 chars. Endurecer a entrada viraria um outage.
+- `TwoFactorVerifyIn.code` aceita TOTP (6 dígitos) **ou** recovery code (10 chars): não aplique pattern de 6 dígitos ali. O `^\d{6}$` é só do `TotpConfirmIn` (confirmação de setup).
+- Entrada inválida responde **422**, não 401. Constraint não aparece no `schema.d.ts` (o openapi-typescript descarta `minLength`/`maxLength`/`pattern` de campo escalar): ela vale no servidor, e o `check-schema` continua sendo o gate de contrato.
+
 ### Lint do frontend (Biome)
 
 - O lint do front é o Biome (`apps/web/biome.json`) e roda como `npm run lint` = `biome check --error-on-warnings`: warning bloqueia igual a erro.
@@ -92,6 +100,20 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - Valide entrada na fronteira, use bind parameters no SQL e preserve as proteções contra XSS existentes no React e na API.
 - Nunca versione `.env`, credenciais, tokens ou chaves. Use `.env.example` apenas para nomes de variáveis sem segredos.
 
+### Imagem, saúde e boot
+
+- O Dockerfile é multi-stage (`build-web` → `build-api` → `runtime`): toolchain e uv ficam só no stage de build; a imagem final copia apenas `/opt/venv` e roda como `app` (uid 10001, sem shell). Não reinstale toolchain na final, não adicione `curl` (o healthcheck usa o `urllib` do venv) e **não troque a base do runtime**: o venv referencia `/usr/local/bin/python3.12` por symlink absoluto.
+- Liveness ≠ readiness: `/api/v1/livez` não toca o banco (liveness decide restart); `/api/v1/healthz` checa o banco e devolve **503** + `degraded`/`db=false` (readiness é para proxy/LB). O HEALTHCHECK do container é o **livez** — se fosse o readiness, uma queda do Postgres reiniciaria um processo saudável.
+- `worker` e `migrate` desligam o healthcheck da imagem (`healthcheck: disable: true`): não servem HTTP.
+- Papéis do entrypoint: `migrate` (one-shot, roda `alembic upgrade head`), `api`, `worker`. api/worker **não** rodam migration (evita corrida). A espera do Postgres usa `pg_isready` (fallback TCP) e **termina com `exit 1`** ao estourar.
+- `API_INTERNAL_PORT` é a porta interna do container; `API_PORT` é a porta publicada no host. uvicorn e healthcheck usam a interna.
+
+### Backup e restauração
+
+- `scripts/backup.sh` roda no **host** (exige `pg_dump`/`rclone` no PATH). Sem `RCLONE_BUCKET` ele roda em modo local e mantém o dump. A sanidade do dump é `pg_restore --list`, não o tamanho do arquivo.
+- `scripts/restore.sh` exige alvo explícito (`--db`/`POSTGRES_RESTORE_DB`) e `--yes`: nunca adivinhe o banco de destino.
+- `scripts/test-restore.sh` é a prova: cria bancos `<db>_restore_test_src/dst`, faz backup→restore e confere count, `to_regclass`, md5 do conteúdo, índice, PK e sequência. Ele só opera em banco com `restore_test` no nome. `just test-restore` roda local (exige Postgres + client no PATH); o CI roda o mesmo script no job `restore-test`.
+
 ### SAST automatizado (Semgrep)
 
 As regras acima que dá para checar mecanicamente estão em `semgrep.yml` (raiz). `just semgrep` roda o gate local; o CI roda o mesmo scan no job `sast`.
@@ -131,5 +153,7 @@ Use a menor matriz que cubra a mudança e rode `just ci` antes de submeter alter
 | Schema Pydantic, rota ou contrato OpenAPI | `just web-types && just check-schema` (o `check-schema` falha se alguma resposta de rota ficar sem contrato tipado) |
 | Dependências Python ou npm | `just api-audit` e `just web-audit` |
 | Qualquer alteração de código coberta pelas regras do `semgrep.yml` | `just semgrep` |
+| Dockerfile, compose ou entrypoint | `just validate-compose` + `bash -n scripts/entrypoint.sh` (sem daemon: `docker compose config --quiet`; o build real só no CI) |
+| Backup ou restauração | `bash -n scripts/backup.sh scripts/restore.sh scripts/test-restore.sh` + `just test-restore` (exige Postgres + client no PATH) |
 
-`just ci` inclui `just semgrep` (SAST), as auditorias de dependências e `just e2e-mock`; não inclui build do frontend, E2E contra a stack real, build Docker ou Trivy; rode esses checks quando a mudança os alcançar. O pre-commit não substitui `just ci`.
+`just ci` inclui `just semgrep` (SAST), as auditorias de dependências e `just e2e-mock`; não inclui build do frontend, E2E contra a stack real, build Docker, Trivy nem o teste de restauração; rode esses checks quando a mudança os alcançar. O pre-commit não substitui `just ci`.

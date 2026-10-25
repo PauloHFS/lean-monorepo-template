@@ -569,6 +569,112 @@ só 2 specs, ambos exigindo API+DB (o CI não rodava E2E) e o `e2e-full` apontav
 
 ---
 
+## AD-020 · Validação de entrada na fronteira (constraints nos schemas)
+
+**Status**: current.
+
+**Context**: os schemas de entrada aceitavam quase tudo. `RegisterIn.password`
+tinha `min_length=8` hardcoded (duplicando `settings.password_min_length`),
+`LoginIn.password` não tinha limite nenhum, `TotpConfirmIn.code` aceitaria "abc",
+`TwoFactorVerifyIn.code` não tinha limites (e precisa aceitar TOTP **ou**
+recovery code), `pending_token` não tinha limites, `EnqueueEmailIn.subject/body`
+não tinham teto e `list_users` aceitava `limit`/`offset` negativos ou absurdos.
+O front já validava senha (mín. 8) e código (mín. 6) no Zod — ou seja, o backend
+era a fronteira **mais permissiva**, e um cliente que não passasse pelo front
+passaria.
+
+**Decision**:
+- Todo schema de entrada declara suas constraints em Pydantic v2
+  (`Field(min_length=..., max_length=..., pattern=...)`), e paginação usa
+  `Query(ge=..., le=...)`.
+- `RegisterIn.password` = `Field(min_length=settings.password_min_length,
+  max_length=72)`: a fonte do mínimo é o `Settings` (não um literal) e o teto de
+  72 existe porque o bcrypt trunca em 72 **bytes**.
+- `LoginIn.password` fica **sem** `max_length`. O truncamento do bcrypt acontece
+  nos dois lados, então uma senha de 100 chars gravada antes desta mudança
+  continua verificando; limitar o login expulsaria do próprio login usuários
+  legados. Endurecer a entrada viraria um outage.
+- `TwoFactorVerifyIn.code` aceita 6..64 chars (TOTP de 6 dígitos **ou** recovery
+  code de 10 chars) e **não** recebe pattern de 6 dígitos. O pattern `^\d{6}$`
+  fica só em `TotpConfirmIn.code`, que é a confirmação de setup do TOTP.
+- `pending_token` (16..128), `challenge` de passkey (8..1024), `subject` (≤200),
+  `body` (≤100 000), `limit` (1..100) e `offset` (≥0).
+
+**Consequences**:
+- Entrada inválida passa a responder **422** em vez de 401. O front já validava
+  no cliente, então o fluxo normal não muda.
+- As constraints **não** aparecem no `schema.d.ts`: o openapi-typescript descarta
+  `minLength`/`maxLength`/`pattern` de campos escalares. Elas ficam no
+  `apps/api/openapi.json` e são aplicadas no servidor — o gate de contrato
+  (`just check-schema`) continua válido.
+- `apps/api/tests/test_validation.py` (20 testes) fixa os limites exatos e
+  documenta a armadilha do login; `tests/test_properties_validators.py` passou a
+  exigir rejeição.
+- Se `password_min_length` for configurado acima de 72, `Field(min_length>72,
+  max_length=72)` fica inconsistente: o teto é do bcrypt, não um tunable.
+- O limite de 72 é contado em CARACTERES, enquanto o truncamento do bcrypt é em
+  BYTES: senhas multibyte ainda podem truncar (comportamento pré-existente).
+
+---
+
+## AD-021 · Imagem enxuta non-root, saúde em camadas, boot resiliência e backup com prova
+
+**Status**: current.
+
+**Context**: a imagem final carregava o toolchain de compilação (`build-essential`,
+`libpq-dev`, `uv`) e rodava como root; `COPY apps/api` levava `tests/` e
+`.hypothesis/`; o `curl` existia só para o healthcheck. O healthcheck do
+container chamava `/api/v1/healthz`, que checa o banco — uma queda do Postgres
+marcava o container unhealthy e reiniciava um processo saudável; o próprio
+endpoint prometia 503 no docstring e devolvia 500, com `degraded`/`db=False`
+inalcançável. O boot tinha duas falhas: o loop de espera do Postgres terminava
+**sem erro** após 60 tentativas (o Alembic mascarava a causa) e `api` e `worker`
+rodavam `alembic upgrade head` ao mesmo tempo. O backup existia (`pg_dump` → R2,
+retenção de 14 dias), mas a sanidade era só "arquivo não vazio" — um dump
+truncado passava — e **não existia** `restore.sh` nem teste de restauração.
+
+**Decision**:
+- **Imagem**: 3 stages (`build-web` → `build-api` → `runtime`) com cache mounts de
+  npm e uv (BuildKit); toolchain e uv ficam só no stage de build; a imagem final
+  copia apenas `/opt/venv` e roda como `app` (uid 10001, sem shell). O `curl`
+  sai: o healthcheck usa o `urllib` do próprio venv. A base do runtime é a
+  **mesma** do build porque o venv referencia `/usr/local/bin/python3.12` por
+  symlink absoluto — trocar a base quebra o venv.
+- **Saúde em camadas**: `/api/v1/livez` (liveness, não toca o banco) e
+  `/api/v1/healthz` (readiness, timeout de 2s, 503 + `degraded`/`db=False`
+  reais). O HEALTHCHECK do container usa **livez**: é o liveness que decide
+  restart, readiness é para proxy/LB. `worker` e `migrate` desligam o healthcheck
+  da imagem (não servem HTTP).
+- **Boot**: o entrypoint ganha o papel `migrate` (one-shot); api e worker passam a
+  depender de `service_completed_successfully` — sem corrida de migrations. A
+  espera do Postgres usa `pg_isready` (fallback TCP) e **termina com exit 1** ao
+  estourar. `API_INTERNAL_PORT` é a porta interna do container; `API_PORT` é a
+  porta publicada no host. O worker ganhou retry com backoff na abertura do app
+  (`tenacity`, que já era dependência e não era usado).
+- **Backup com prova**: `pg_restore --list` valida o dump (não só o tamanho),
+  sidecar `.sha256`, `flock` contra execuções sobrepostas (com degradação no
+  macOS, que não tem `flock`), modo local quando não há bucket (mantém o dump) e
+  `scripts/restore.sh` + `scripts/test-restore.sh` — o teste cria bancos de
+  descarte, faz backup→restore e confere count, `to_regclass`, md5 do conteúdo,
+  índice, PK e sequência. O CI ganhou o job `restore-test` com Postgres como
+  service container.
+
+**Consequences**:
+- O enunciado original da Fase 4 citava **Redis** e um **"daemon Go"**: não
+  existem neste repositório (AD-001 é Postgres-only; o daemon real é `uvicorn` +
+  o worker Procrastinate, no mesmo binário). O escopo foi adaptado ao stack real.
+- A imagem final passa de ~500–800 MB (estimativa) para ~250–450 MB — o número
+  real só sai com `docker build`, que não foi executado (sem daemon).
+- `docker build`, o HEALTHCHECK real, o drain de 30s do worker e o job
+  `restore-test` **não foram validados localmente**: dependem de daemon. O bind
+  mount `:ro` com uid 10001 funciona no Docker Desktop; em Linux puro o host
+  precisa permitir leitura pelo uid do container.
+- O serviço `migrate` roda `alembic upgrade head` a cada `up` — idempotente, mas
+  significa que ele sempre roda antes da API.
+- A base da imagem ainda não é pinada por digest (exige consultar o registry).
+
+---
+
 ## Future ADs (open questions)
 
 - _(none open — all shipped infra is documented above; product-level decisions like

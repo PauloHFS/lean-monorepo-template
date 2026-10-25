@@ -36,7 +36,7 @@ Template enxuto de monoprojeto com:
 │   │   │   ├── cli.py        dump-openapi, seed, create-user, enqueue-job, db-status
 │   │   │   └── main.py       FastAPI app
 │   │   ├── migrations/       alembic (1 arquivo: 0001_initial_schema.py)
-│   │   └── tests/            pytest (37 testes)
+│   │   └── tests/            pytest (114 testes)
 │   └── web/                  React SPA (Vite)
 │       ├── e2e/              Playwright specs
 │       ├── src/
@@ -76,7 +76,7 @@ Endpoints:
 - App: <http://localhost:8000>  (mesmo host serve SPA + API)
 - API: <http://localhost:8000/api/v1>
 - Docs: <http://localhost:8000/api/docs>
-- Health: <http://localhost:8000/api/v1/healthz>
+- Health: <http://localhost:8000/api/v1/healthz> (readiness) · <http://localhost:8000/api/v1/livez> (liveness)
 - Mailpit (dev): <http://localhost:8025>  (`just mail`)
 
 Pra criar um admin e logar:
@@ -282,9 +282,22 @@ just backup-now
 ```
 
 `backup.sh`:
-1. `pg_dump -Fc -Z 9` → arquivo local.
-2. `rclone copyto` → `rclone:lean-monorepo-backups/db/<db>_<ts>.dump`.
-3. `rclone delete --min-age 14d` → retenção.
+1. `pg_dump -Fc -Z 9` → arquivo local + sidecar `.sha256`.
+2. Sanidade real: `pg_restore --list` (um dump truncado **não** passa só por ter tamanho).
+3. `rclone copyto` → `r2:<bucket>/db/<db>_<ts>.dump` (sem `RCLONE_BUCKET` roda em modo local e **mantém** o dump).
+4. `rclone delete --min-age 14d` → retenção.
+
+Os scripts rodam no **host** (precisam de `pg_dump`/`pg_restore`/`psql` no PATH) e usam `flock` para não se sobrepor.
+
+### Restauração (com prova)
+
+```bash
+just test-restore                              # backup -> restore -> verificação (exige Postgres + client)
+./scripts/restore.sh <dump> --db meu_restore --dry-run
+./scripts/restore.sh <dump> --db meu_restore --yes
+```
+
+`restore.sh` exige **alvo explícito** (`--db`/`POSTGRES_RESTORE_DB`) e `--yes`: nunca adivinha o banco de destino. `test-restore.sh` cria bancos de descarte (`<db>_restore_test_src/dst`), faz backup→restore e confere count, `to_regclass`, md5 do conteúdo, índice, PK e sequência — e só opera em banco com `restore_test` no nome. O CI roda o mesmo script no job `restore-test`.
 
 Para credenciais, prefira `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` de **Scoped Token** do R2 (apenas bucket de backup).
 
@@ -328,8 +341,10 @@ No front, os tipos vêm de `components["schemas"][...]` (reexportados em `src/ap
 - **e2e**: Playwright nos cenários mockados (`page.route`), sem API/DB
 - **schema-sync**: regenera `schema.d.ts` e falha se estiver desatualizado
 - **compose**: valida que `docker-compose.yml` continua válido
+- **docker**: build da imagem + Trivy (CRITICAL/HIGH bloqueia)
+- **restore-test**: backup → restore → verificação num Postgres efêmero
 
-Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, E2E mock, schema e compose).
+Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, E2E mock, schema e compose). O build da imagem, o Trivy e a prova de restauração só rodam no CI (exigem daemon).
 
 ---
 
@@ -342,10 +357,13 @@ Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, 
   - Tudo roda em `just ci` (mesmo do GitHub Actions).
 - **Editor (VSCode)**: `.vscode/` tem settings compartilhadas (Biome como formatter default, Ruff no Python, Pyright, Tailwind, etc.), launch configs (API, worker, pytest) e tasks (`just init`, `just dev`, `just ci`, etc.). Abre o workspace e o VSCode oferece instalar as extensões recomendadas.
 - **Migrações**: `just api-revision "add foo"` → revisar antes de commitar.
+- **Saúde**: liveness (`/api/v1/livez`, não toca o banco) ≠ readiness (`/api/v1/healthz`, 503 + `degraded` quando o banco cai). O HEALTHCHECK do container usa o **livez**; `worker` e `migrate` desligam o healthcheck (não servem HTTP).
+- **Boot**: papéis `migrate` (one-shot, roda a migration) | `api` | `worker`. Só o `migrate` roda `alembic upgrade head` — api/worker esperam ele terminar.
+- **Backup/restore**: `just backup-now` (host, exige `pg_dump`/`rclone`), `just test-restore` (prova de restauração), `./scripts/restore.sh <dump> --db <alvo> --yes`.
 - **Dependências Python**: `uv` + `apps/api/uv.lock` (fonte de verdade); pins exatos em `apps/api/pyproject.toml`. `apps/api/requirements.txt` não existe mais. `just api-install` roda `uv sync`; `just api-audit` audita as deps de produção (pip-audit via `uvx`).
 - **Segredos**: NUNCA comitar `.env`. Em prod, monte via secret manager do orquestrador.
 - **Logs**: `structlog` JSON em prod, console em dev (stderr pra não poluir stdout).
-- **Tests**: `just test` roda a suite de 91 testes. Tudo que não precisa de DB.
+- **Tests**: `just test` roda a suite de 114 testes. Tudo que não precisa de DB.
 - **E2E**: `just e2e-mock` roda só os cenários mockados (`page.route`, sem API/DB — é o que o CI roda); `just e2e` roda a suíte inteira pulando o que precisa de backend; `just e2e-full` sobe o stack e roda contra a SPA servida pela API em `:8000`.
 
 ---
