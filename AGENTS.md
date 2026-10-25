@@ -113,7 +113,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - `worker` e `migrate` desligam o healthcheck da imagem (`healthcheck: disable: true`): não servem HTTP.
 - Papéis do entrypoint: `migrate` (one-shot, roda `alembic upgrade head`), `api`, `worker`. api/worker **não** rodam migration (evita corrida). A espera do Postgres usa `pg_isready` (fallback TCP) e **termina com `exit 1`** ao estourar.
 - `API_INTERNAL_PORT` é a porta interna do container; `API_PORT` é a porta publicada no host. uvicorn e healthcheck usam a interna.
-- O job `docker` do CI **mede o tamanho real da imagem** e falha acima do teto (700 MB): a estimativa local (~250–450 MB) é só estimativa, quem manda é o gate.
+- O job `docker` do CI **mede o tamanho real da imagem** e falha acima do teto (700 MB): a imagem atual mede **294,7 MB**. A estimativa local (~250–450 MB) era chute; quem manda é o gate.
 
 ### Backup e restauração
 
