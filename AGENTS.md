@@ -72,6 +72,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - **Tailwind 4 é CSS-first**: não existe `tailwind.config.js` nem `postcss.config.js` (o plugin é `@tailwindcss/vite` no `vite.config.ts`). O tema vive em `@theme` no `src/index.css` (`--color-brand-*`, `--font-sans`) e as classes do design system em `@utility` — no v4, `@apply` de classe customizada é erro fatal.
 - No v4, `shadow-sm` é o antigo `shadow` (use `shadow-xs` para o antigo `shadow-sm`) e `outline-none` remove o outline de verdade (use `outline-hidden`).
 - O `overrides` de `@hookform/resolvers` (`effect: 4.0.0`) existe porque o npm 11 auto-resolve a cadeia opcional `@typeschema/*`/`@effect/schema` (que exige Effect 3.x) e quebra a install limpa com `ERESOLVE`. Não remova sem testar `npm ci` do zero.
+- **TypeScript fica no 5.9.3**: o 7.0.2 (port nativo em Go) não expõe a compiler API, e o `openapi-typescript` — que gera o `schema.d.ts` (gate de contrato) — usa essa API e declara `peer typescript: ^5.x`; com o 7 na raiz o `npm install` quebra com `ERESOLVE`. Só suba quando o `openapi-typescript` acompanhar.
 
 ### Banco de dados
 

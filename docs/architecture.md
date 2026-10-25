@@ -806,9 +806,17 @@ mantida, mas o 19 já era o `latest` e nenhuma dependência do repo o bloqueava.
   mudou**. Os breaking do v8 (flags `future.v8_*` removidas, `meta.data`,
   `react-router-dom` derrubado, contextos `UNSAFE_` reestruturados no 8.4) não
   atingem este app.
-- **Fica de fora, de propósito**: `typescript` (5.9.3 — o 7.0.2 é o port nativo
-  em Go sem compiler API e o 6.x muda defaults que exigem revisão do
-  `tsconfig`).
+- **Fica de fora, de propósito**: `typescript` (5.9.3). O 7.0.2 é o port nativo em
+  Go e o typecheck do app passaria nele (o único ajuste seria um
+  `src/vite-env.d.ts`, pelo default novo `noUncheckedSideEffectImports`), mas o
+  `openapi-typescript@7.13.0` — o gerador do `schema.d.ts`, que é o gate de
+  contrato do repo (AD-018) — usa a **compiler API** do TypeScript
+  (`ts.factory.createKeywordTypeNode`) e declara `peerDependencies:
+  {typescript: "^5.x"}`. Com o TS 7 na raiz o `npm install` morre com
+  `ERESOLVE` (peer conflitante) e, com `--legacy-peer-deps`, o gerador quebra
+  em runtime porque o 7.0 não expõe a compiler API (ela só chega no 7.1). Não
+  existe v8 do `openapi-typescript`, então o TS 7 fica de fora até a tool
+  acompanhar.
 
 **Consequences**:
 - O `npm audit` completo ficou em **0 vulnerabilidades** (as 3 moderate do
@@ -817,6 +825,12 @@ mantida, mas o 19 já era o `latest` e nenhuma dependência do repo o bloqueava.
   Vite 7+ já eram atendidos, o `react-router-dom` não é usado desde o v7 e
   nenhum outro breaking do v8 toca este app — **zero mudança de código**, só
   `package.json` e lockfile.
+- O `typescript` continua no **5.9.3**: o 7.0.2 foi testado (o typecheck do app
+  passava, com o único ajuste sendo um `src/vite-env.d.ts` para o default novo
+  `noUncheckedSideEffectImports`), mas o `npm install` quebra com `ERESOLVE` por
+  causa do peer `typescript: ^5.x` do `openapi-typescript`, e o gerador do
+  `schema.d.ts` depende da compiler API que o 7.0 não expõe. A tentativa foi
+  revertida.
 - Paridade visual exige dois ajustes: no v4 `shadow-sm` é o antigo `shadow` (o
   antigo `shadow-sm` virou `shadow-xs`) e `outline-none` agora remove o outline
   de verdade (o antigo virou `outline-hidden`). Ambos foram aplicados nas
