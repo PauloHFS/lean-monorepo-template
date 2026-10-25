@@ -3,6 +3,11 @@
 # Sem este arquivo, o `COPY .` leva .venv, __pycache__, node_modules,
 # .git, .env, etc. para a imagem — deixando-a gigante e potencialmente
 # vazando segredos.
+#
+# Regra: nada que o Dockerfile copie pode estar listado aqui. A imagem precisa
+# de apps/api/{app,migrations,alembic.ini,pyproject.toml,uv.lock} e de
+# apps/web/{package.json,package-lock.json,index.html,src,public,vite.config.ts,
+# tsconfig.json,tailwind.config.js,postcss.config.js} + scripts/.
 # =============================================================================
 
 # VCS
@@ -27,14 +32,21 @@ apps/api/.venv-audit
 apps/api/dist
 apps/api/build
 apps/api/openapi.json
+# Não usados em runtime
+apps/api/tests
+apps/api/.hypothesis
+apps/api/.pytest_cache
+apps/api/pyrightconfig.json
 
 # Frontend (Node)
 apps/web/node_modules
 apps/web/dist
 apps/web/.vite
-
-# OpenAPI gerado
-apps/api/openapi.json
+# Playwright/E2E não participa do `vite build`
+apps/web/e2e
+apps/web/test-results
+apps/web/playwright.config.ts
+*.tsbuildinfo
 
 # OS / IDEs
 .DS_Store
@@ -42,6 +54,14 @@ Thumbs.db
 .idea
 .vscode
 *.swp
+
+# CI / tooling de dev (não entra na imagem)
+.github
+AGENTS.md
+CLAUDE.md
+semgrep.yml
+justfile
+.pre-commit-config.yaml
 
 # Logs
 *.log

@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/api/v1/livez": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Liveness (process only)
+         * @description 200 enquanto o processo está vivo. Sem DB, sem dependências externas.
+         */
+        get: operations["livez_api_v1_livez_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/healthz": {
         parameters: {
             query?: never;
@@ -12,8 +32,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Deep health check (DB ping)
-         * @description 200 quando o app + Postgres estão OK. 503 quando algo falha.
+         * Readiness (DB required)
+         * @description 200 quando o app + Postgres estão OK; 503 (degraded) caso contrário.
          */
         get: operations["healthz_api_v1_healthz_get"];
         put?: never;
@@ -341,6 +361,15 @@ export interface components {
             /** Db */
             db: boolean;
         };
+        /** LivenessOut */
+        LivenessOut: {
+            /**
+             * Status
+             * @default ok
+             * @constant
+             */
+            status: "ok";
+        };
         /** LoginIn */
         LoginIn: {
             /**
@@ -606,6 +635,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    livez_api_v1_livez_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LivenessOut"];
+                };
+            };
+        };
+    };
     healthz_api_v1_healthz_get: {
         parameters: {
             query?: never;
