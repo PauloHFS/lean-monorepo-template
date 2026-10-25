@@ -3,6 +3,7 @@ import { useState } from 'react'
 
 import { ApiError } from '../api/client'
 import { TwoFactorApi } from '../api/endpoints'
+import { bytesToBase64Url } from '../lib/base64'
 
 type Stage = 'idle' | 'scanning' | 'confirming' | 'enabled'
 
@@ -70,18 +71,26 @@ export function Security() {
       // para o backend verificar.
       const credential = (await navigator.credentials.create({
         publicKey: options as unknown as PublicKeyCredentialCreationOptions,
-      })) as unknown
+      })) as PublicKeyCredential | null
 
-      // Serializa para base64 (formato que o backend aceita)
-      const att = credential as {
-        response: { clientDataJSON: ArrayBuffer; attestationObject: ArrayBuffer }
+      if (!credential) {
+        setError('registro cancelado')
+        return
       }
+
+      const resp = credential.response as AuthenticatorAttestationResponse
       const payload = {
         challenge,
-        client_data_b64: btoa(String.fromCharCode(...new Uint8Array(att.response.clientDataJSON))),
-        attestation_b64: btoa(
-          String.fromCharCode(...new Uint8Array(att.response.attestationObject)),
-        ),
+        credential: {
+          id: credential.id,
+          rawId: bytesToBase64Url(credential.rawId),
+          type: 'public-key',
+          response: {
+            clientDataJSON: bytesToBase64Url(resp.clientDataJSON),
+            attestationObject: bytesToBase64Url(resp.attestationObject),
+            transports: resp.getTransports?.() ?? undefined,
+          },
+        },
       }
       await TwoFactorApi.passkeyRegisterVerify(payload)
       setError('passkey registrada!')

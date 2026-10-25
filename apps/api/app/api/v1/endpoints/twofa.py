@@ -7,6 +7,7 @@ from typing import Any, cast
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import CursorResult, text
+from webauthn import base64url_to_bytes
 
 from app.api.deps import DB, CurrentUser
 from app.core import totp as totp_mod
@@ -189,21 +190,49 @@ class PasskeyOptionsOut(BaseModel):
 
 
 class PasskeyRegisterIn(BaseModel):
-    challenge: str  # b64 do setup
-    client_data_b64: str
-    attestation_b64: str
+    challenge: str  # "challenge_b64:pending_token" retornado nas options
+    credential: dict[str, Any]
 
 
 class PasskeyLoginIn(BaseModel):
-    challenge: str
-    client_data_b64: str
-    authenticator_b64: str
-    signature_b64: str
-    credential_id_b64: str  # para localizar qual pubkey comparar
+    challenge: str  # "challenge_b64:pending_token" retornado nas options
+    credential: dict[str, Any]
+
+
+def _split_challenge(value: str) -> tuple[str, str]:
+    """Separa o challenge do token de pending devolvido pelas options."""
+    try:
+        challenge_b64, pending_token = value.split(":", 1)
+    except ValueError:
+        raise HTTPException(400, "invalid challenge") from None
+    if not challenge_b64 or not pending_token:
+        raise HTTPException(400, "invalid challenge")
+    return challenge_b64, pending_token
+
+
+def _credential_id(credential: dict[str, Any]) -> bytes:
+    """Extrai o credential_id (bytes) do dict enviado pelo browser."""
+    raw_id = credential.get("id")
+    if not isinstance(raw_id, str):
+        raise HTTPException(400, "invalid credential")
+    return base64url_to_bytes(raw_id)
+
+
+async def _consume_challenge(pending_token: str, challenge_b64: str) -> dict[str, Any]:
+    """Consome o pending e confere que o challenge enviado é o armazenado."""
+    pending = await totp_mod.consume_pending(pending_token)
+    if pending is None:
+        raise HTTPException(401, "pending invalid or expired")
+    stored = pending.get("challenge")
+    if not isinstance(stored, str) or stored != challenge_b64:
+        raise HTTPException(400, "challenge mismatch")
+    return pending
 
 
 @router.post("/passkey/register/options", response_model=PasskeyOptionsOut)
-async def passkey_register_options(user: CurrentUser, session: DB) -> PasskeyOptionsOut:
+async def passkey_register_options(
+    user: CurrentUser, session: DB, request: Request
+) -> PasskeyOptionsOut:
     """Gera options para `navigator.credentials.create()`."""
     existing = (
         (
@@ -220,8 +249,13 @@ async def passkey_register_options(user: CurrentUser, session: DB) -> PasskeyOpt
         user_email=user.email,
         existing_keys=[r["credential_id"] for r in existing],
     )
-    await totp_mod.store_pending(f"passkey:register:{user.id}", ip="", ua="")  # placeholder
-    return PasskeyOptionsOut(options=options, challenge=challenge_b64)
+    token = await totp_mod.store_pending(
+        str(user.id),
+        ip=request.client.host if request.client else None,
+        ua=request.headers.get("user-agent"),
+        challenge=challenge_b64,
+    )
+    return PasskeyOptionsOut(options=options, challenge=f"{challenge_b64}:{token}")
 
 
 @router.post("/passkey/register/verify", status_code=204, response_model=None)
@@ -229,10 +263,13 @@ async def passkey_register_verify(
     payload: PasskeyRegisterIn, user: CurrentUser, session: DB
 ) -> None:
     """Verifica attestation e persiste a credencial."""
+    challenge_b64, pending_token = _split_challenge(payload.challenge)
+    pending = await _consume_challenge(pending_token, challenge_b64)
+    if str(pending.get("user_id")) != str(user.id):
+        raise HTTPException(400, "challenge mismatch")
     info = wa.complete_registration(
-        challenge_b64=payload.challenge,
-        client_data_b64=payload.client_data_b64,
-        attestation_b64=payload.attestation_b64,
+        challenge_b64=challenge_b64,
+        credential=payload.credential,
     )
     await session.execute(
         text(
@@ -271,12 +308,13 @@ async def passkey_login_options(payload: PendingIn, session: DB) -> PasskeyOptio
     if not keys:
         raise HTTPException(400, "no passkeys registered")
     options, challenge_b64 = wa.authentication_options([r["credential_id"] for r in keys])
-    # Guarda challenge num pending atrelado ao mesmo user
+    # Novo pending atrelado ao mesmo user, agora carregando o challenge gerado.
     new_token = await totp_mod.store_pending(
-        pending["user_id"], ip=pending.get("ip"), ua=pending.get("ua")
+        pending["user_id"],
+        ip=pending.get("ip"),
+        ua=pending.get("ua"),
+        challenge=challenge_b64,
     )
-    # Truque para devolver o novo pending_token junto: reusa o mesmo payload do pending.
-    # Aqui simplificamos: cliente faz o GET e depois usa o token retornado no verify.
     return PasskeyOptionsOut(options=options, challenge=f"{challenge_b64}:{new_token}")
 
 
@@ -285,12 +323,10 @@ async def passkey_login_verify(
     payload: PasskeyLoginIn, request: Request, response: Response
 ) -> dict[str, Any]:
     """Verifica assertion e emite cookie."""
-    # payload.challenge contém "challenge_b64:pending_token"
-    challenge_b64, pending_token = payload.challenge.split(":", 1)
-    pending = await totp_mod.consume_pending(pending_token)
-    if pending is None:
-        raise HTTPException(401, "pending invalid")
+    challenge_b64, pending_token = _split_challenge(payload.challenge)
+    pending = await _consume_challenge(pending_token, challenge_b64)
     user_id = pending["user_id"]
+    credential_id = _credential_id(payload.credential)
 
     async with SessionLocal() as session:
         async with session.begin():
@@ -299,9 +335,9 @@ async def passkey_login_verify(
                     await session.execute(
                         text(
                             "SELECT credential_id, public_key, sign_count "
-                            "FROM user_passkeys WHERE user_id = :uid LIMIT 1"
+                            "FROM user_passkeys WHERE credential_id = :cid"
                         ),
-                        {"uid": user_id},
+                        {"cid": credential_id},
                     )
                 )
                 .mappings()
@@ -312,19 +348,16 @@ async def passkey_login_verify(
 
         new_sign_count = wa.complete_authentication(
             challenge_b64=challenge_b64,
-            client_data_b64=payload.client_data_b64,
-            authenticator_b64=payload.authenticator_b64,
-            signature_b64=payload.signature_b64,
+            credential=payload.credential,
+            public_key=bytes(pk["public_key"]),
             sign_count=pk["sign_count"],
-            pubkey_alg=-7,  # ES256 (default para passkeys modernos)
-            pubkey=bytes(pk["public_key"]),
         )
         await session.execute(
             text(
                 "UPDATE user_passkeys SET sign_count = :sc, last_used_at = now() "
-                "WHERE user_id = :uid"
+                "WHERE credential_id = :cid"
             ),
-            {"sc": new_sign_count, "uid": user_id},
+            {"sc": new_sign_count, "cid": credential_id},
         )
         await session.commit()
 

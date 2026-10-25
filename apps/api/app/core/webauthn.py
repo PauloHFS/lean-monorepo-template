@@ -1,55 +1,47 @@
 """WebAuthn (passkey) para 2FA sem senha de app.
 
 Fluxo:
-- registration_options_for() + persistir challenge no cache.
-- verify_registration()    — caller persiste credential no DB.
-- authentication_options_for() + persistir challenge no cache.
-- verify_authentication()  — caller atualiza sign_count.
+- registration_options()  — caller persiste o challenge no pending.
+- complete_registration()  — caller persiste a credential no DB.
+- authentication_options() — caller persiste o challenge no pending.
+- complete_authentication() — caller atualiza sign_count.
 
 Configuração: relying party = origin do front (settings.web_origin).
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from importlib import import_module
-from typing import Any, cast
+import uuid
+from typing import Any
+from urllib.parse import urlparse
 
-from webauthn.metadata import FIDOMetadata
-from webauthn.types import RelyingParty, User, UserVerification
+from webauthn import (
+    base64url_to_bytes,
+    generate_authentication_options,
+    generate_registration_options,
+    verify_authentication_response,
+    verify_registration_response,
+)
+from webauthn.helpers import bytes_to_base64url, options_to_json_dict
+from webauthn.helpers.structs import (
+    AuthenticatorSelectionCriteria,
+    PublicKeyCredentialDescriptor,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
+)
 
 from app.core.config import settings
 
-# py-webauthn 0.0.6 não publica stubs/py.typed; normalizamos a fronteira com
-# tipos explícitos para não propagar Unknown pelo app.
-_OptionsCall = Callable[..., tuple[dict[str, Any], str]]
-_VerifyCall = Callable[..., Any]
-_wa = cast(Any, import_module("webauthn"))
-create_webauthn_credentials = cast(_OptionsCall, _wa.create_webauthn_credentials)
-get_webauthn_credentials = cast(_OptionsCall, _wa.get_webauthn_credentials)
-verify_create_webauthn_credentials = cast(_VerifyCall, _wa.verify_create_webauthn_credentials)
-verify_get_webauthn_credentials = cast(_VerifyCall, _wa.verify_get_webauthn_credentials)
-
 _RP_NAME = "Lean Monorepo"
-_USER_VERIFICATION = UserVerification.Preferred
 
 
 def rp_id_from_origin() -> str:
     """Extrai o host (sem porta, scheme) do web_origin."""
-    origin = settings.web_origin
-    for prefix in ("http://", "https://"):
-        if origin.startswith(prefix):
-            return origin[len(prefix) :].split(":")[0]
+    parsed = urlparse(settings.web_origin)
+    if parsed.hostname:
+        return parsed.hostname
     # sem scheme — assume formato "host" ou "host:port"
-    return origin.split(":")[0]
-
-
-def relying_party() -> RelyingParty:
-    return RelyingParty(id=rp_id_from_origin(), name=_RP_NAME, icon=None)
-
-
-def _user(user_id: str, email: str) -> User:
-    return User(id=user_id.encode("utf-8"), name=email, display_name=email, icon=None)
+    return settings.web_origin.split(":")[0]
 
 
 # ---- Registration ---------------------------------------------------------
@@ -57,35 +49,32 @@ def registration_options(
     user_id: str, user_email: str, existing_keys: list[bytes]
 ) -> tuple[dict[str, Any], str]:
     """Gera opções para `navigator.credentials.create()`. Devolve (options_dict, challenge_b64)."""
-    options, challenge_b64 = create_webauthn_credentials(
-        rp=relying_party(),
-        user=_user(user_id, user_email),
-        existing_keys=existing_keys,
-        user_verification=_USER_VERIFICATION,
+    options = generate_registration_options(
+        rp_id=rp_id_from_origin(),
+        rp_name=_RP_NAME,
+        user_id=uuid.UUID(user_id).bytes,
+        user_name=user_email,
+        user_display_name=user_email,
+        exclude_credentials=[PublicKeyCredentialDescriptor(id=k) for k in existing_keys] or None,
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.PREFERRED,
+            user_verification=UserVerificationRequirement.PREFERRED,
+        ),
     )
-    return options, challenge_b64
+    return options_to_json_dict(options), bytes_to_base64url(options.challenge)
 
 
-def complete_registration(
-    *,
-    challenge_b64: str,
-    client_data_b64: str,
-    attestation_b64: str,
-) -> dict[str, Any]:
+def complete_registration(*, challenge_b64: str, credential: dict[str, Any]) -> dict[str, Any]:
     """Verifica attestation do cliente. Devolve dados para persistir."""
-    result = verify_create_webauthn_credentials(
-        rp=relying_party(),
-        challenge_b64=challenge_b64,
-        client_data_b64=client_data_b64,
-        attestation_b64=attestation_b64,
-        fido_metadata=FIDOMetadata(entries=[], aaguid_map={}, cki_map={}),
-        user_verification_required=False,
+    result = verify_registration_response(
+        credential=credential,
+        expected_challenge=base64url_to_bytes(challenge_b64),
+        expected_rp_id=rp_id_from_origin(),
+        expected_origin=settings.web_origin,
     )
-    # py-webauthn 0.0.6 não declara `credential_id` em CreateResult, mas o app
-    # assume esse campo (mesma suposição do código original).
     return {
         "credential_id": result.credential_id,
-        "public_key": result.public_key,
+        "public_key": result.credential_public_key,
         "sign_count": result.sign_count,
     }
 
@@ -93,34 +82,28 @@ def complete_registration(
 # ---- Authentication --------------------------------------------------------
 def authentication_options(existing_keys: list[bytes]) -> tuple[dict[str, Any], str]:
     """Gera opções para `navigator.credentials.get()`. Devolve (options_dict, challenge_b64)."""
-    options, challenge_b64 = get_webauthn_credentials(
-        rp=relying_party(),
-        existing_keys=existing_keys,
-        user_verification=_USER_VERIFICATION,
+    options = generate_authentication_options(
+        rp_id=rp_id_from_origin(),
+        allow_credentials=[PublicKeyCredentialDescriptor(id=k) for k in existing_keys] or None,
+        user_verification=UserVerificationRequirement.PREFERRED,
     )
-    return options, challenge_b64
+    return options_to_json_dict(options), bytes_to_base64url(options.challenge)
 
 
 def complete_authentication(
     *,
     challenge_b64: str,
-    client_data_b64: str,
-    authenticator_b64: str,
-    signature_b64: str,
+    credential: dict[str, Any],
+    public_key: bytes,
     sign_count: int,
-    pubkey_alg: int,
-    pubkey: bytes,
 ) -> int:
     """Verifica assertion. Devolve o novo sign_count (caller atualiza DB)."""
-    result = verify_get_webauthn_credentials(
-        rp=relying_party(),
-        challenge_b64=challenge_b64,
-        client_data_b64=client_data_b64,
-        authenticator_b64=authenticator_b64,
-        signature_b64=signature_b64,
-        sign_count=sign_count,
-        pubkey_alg=pubkey_alg,
-        pubkey=pubkey,
-        user_verification_required=False,
+    result = verify_authentication_response(
+        credential=credential,
+        expected_challenge=base64url_to_bytes(challenge_b64),
+        expected_rp_id=rp_id_from_origin(),
+        expected_origin=settings.web_origin,
+        credential_public_key=public_key,
+        credential_current_sign_count=sign_count,
     )
     return result.new_sign_count

@@ -355,14 +355,8 @@ export interface components {
         PasskeyLoginIn: {
             /** Challenge */
             challenge: string;
-            /** Client Data B64 */
-            client_data_b64: string;
-            /** Authenticator B64 */
-            authenticator_b64: string;
-            /** Signature B64 */
-            signature_b64: string;
-            /** Credential Id B64 */
-            credential_id_b64: string;
+            /** Credential */
+            credential: Record<string, never>;
         };
         /** PasskeyOptionsOut */
         PasskeyOptionsOut: {
@@ -375,10 +369,8 @@ export interface components {
         PasskeyRegisterIn: {
             /** Challenge */
             challenge: string;
-            /** Client Data B64 */
-            client_data_b64: string;
-            /** Attestation B64 */
-            attestation_b64: string;
+            /** Credential */
+            credential: Record<string, never>;
         };
         /** PendingIn */
         PendingIn: {

@@ -6,6 +6,9 @@ import type { EnqueueEmailIn, EnqueueEmailOut, HealthResponse, LoginIn, UserOut 
 
 import { api } from './client'
 
+type PasskeyOptionsOut = { options: Record<string, unknown>; challenge: string }
+type PasskeyCredentialIn = { challenge: string; credential: Record<string, unknown> }
+
 export const AuthApi = {
   me: () => api.get<UserOut>('/api/v1/auth/me'),
   login: (body: LoginIn) =>
@@ -42,27 +45,14 @@ export const TwoFactorApi = {
 
   // Passkey
   passkeyRegisterOptions: () =>
-    api.post<{ options: Record<string, unknown>; challenge: string }>(
-      '/api/v1/auth/2fa/passkey/register/options',
-    ),
+    api.post<PasskeyOptionsOut>('/api/v1/auth/2fa/passkey/register/options'),
 
-  passkeyRegisterVerify: (payload: {
-    challenge: string
-    client_data_b64: string
-    attestation_b64: string
-  }) => api.post<void>('/api/v1/auth/2fa/passkey/register/verify', payload),
+  passkeyRegisterVerify: (payload: PasskeyCredentialIn) =>
+    api.post<void>('/api/v1/auth/2fa/passkey/register/verify', payload),
 
   passkeyLoginOptions: (body: { pending_token: string }) =>
-    api.post<{ options: Record<string, unknown>; challenge: string }>(
-      '/api/v1/auth/2fa/passkey/login/options',
-      body,
-    ),
+    api.post<PasskeyOptionsOut>('/api/v1/auth/2fa/passkey/login/options', body),
 
-  passkeyLoginVerify: (payload: {
-    challenge: string
-    client_data_b64: string
-    authenticator_b64: string
-    signature_b64: string
-    credential_id_b64: string
-  }) => api.post<{ ok: boolean }>('/api/v1/auth/2fa/passkey/login/verify', payload),
+  passkeyLoginVerify: (payload: PasskeyCredentialIn) =>
+    api.post<{ ok: boolean }>('/api/v1/auth/2fa/passkey/login/verify', payload),
 }

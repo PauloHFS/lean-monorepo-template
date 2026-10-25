@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { ApiError } from '../api/client'
 import { AuthApi, TwoFactorApi } from '../api/endpoints'
 import { useAuth } from '../lib/auth'
+import { bytesToBase64Url } from '../lib/base64'
 
 const credSchema = z.object({
   email: z.string().email('e-mail inválido'),
@@ -22,13 +23,6 @@ type CodeData = z.infer<typeof codeSchema>
 type Pending2fa = {
   token: string
   methods: string[]
-}
-
-function bufToB64Url(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf)
-  let binary = ''
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
 export function Login() {
@@ -96,26 +90,27 @@ export function Login() {
 
       const credential = (await navigator.credentials.get({
         publicKey: options as unknown as PublicKeyCredentialRequestOptions,
-      })) as {
-        rawId: ArrayBuffer
-        response: {
-          clientDataJSON: ArrayBuffer
-          authenticatorData: ArrayBuffer
-          signature: ArrayBuffer
-        }
-      } | null
+      })) as PublicKeyCredential | null
 
       if (!credential) {
         setSubmitError('autenticação cancelada')
         return
       }
 
+      const resp = credential.response as AuthenticatorAssertionResponse
       await TwoFactorApi.passkeyLoginVerify({
         challenge,
-        client_data_b64: bufToB64Url(credential.response.clientDataJSON),
-        authenticator_b64: bufToB64Url(credential.response.authenticatorData),
-        signature_b64: bufToB64Url(credential.response.signature),
-        credential_id_b64: bufToB64Url(credential.rawId),
+        credential: {
+          id: credential.id,
+          rawId: bytesToBase64Url(credential.rawId),
+          type: 'public-key',
+          response: {
+            clientDataJSON: bytesToBase64Url(resp.clientDataJSON),
+            authenticatorData: bytesToBase64Url(resp.authenticatorData),
+            signature: bytesToBase64Url(resp.signature),
+            userHandle: resp.userHandle ? bytesToBase64Url(resp.userHandle) : undefined,
+          },
+        },
       })
 
       const user = await AuthApi.me()

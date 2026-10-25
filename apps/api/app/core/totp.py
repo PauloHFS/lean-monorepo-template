@@ -83,10 +83,14 @@ def hash_recovery_code(code: str) -> str:
 _PENDING_TTL_S = 300  # 5 min para completar o 2FA
 
 
-async def store_pending(user_id: str, *, ip: str | None, ua: str | None) -> str:
+async def store_pending(
+    user_id: str, *, ip: str | None, ua: str | None, challenge: str | None = None
+) -> str:
     token = secrets.token_urlsafe(24)
-    payload = json.dumps({"user_id": user_id, "ip": ip, "ua": ua})
-    await cache.set(f"2fa:pending:{token}", payload, ttl_s=_PENDING_TTL_S)
+    payload: dict[str, Any] = {"user_id": user_id, "ip": ip, "ua": ua}
+    if challenge is not None:
+        payload["challenge"] = challenge
+    await cache.set(f"2fa:pending:{token}", json.dumps(payload), ttl_s=_PENDING_TTL_S)
     return token
 
 
