@@ -92,9 +92,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Guard de drift: a versão do Node tem fonte única em `.node-version`;
+      # o default do ARG no Dockerfile precisa bater com ela.
+      - name: Guard Node version drift
+        working-directory: .
+        run: |
+          set -euo pipefail
+          expected=$(tr -d '[:space:]' < .node-version)
+          arg=$(grep -oE '^ARG NODE_VERSION=[0-9]+' Dockerfile | cut -d= -f2)
+          if [ "$expected" != "$arg" ]; then
+            echo "::error::.node-version ($expected) diverge do ARG NODE_VERSION ($arg) no Dockerfile"
+            exit 1
+          fi
+
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
 
@@ -120,7 +133,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
 
@@ -147,7 +160,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
 
@@ -167,7 +180,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build image
-        run: docker build -t lean-monorepo:ci .
+        run: docker build --build-arg NODE_VERSION="$(cat .node-version)" -t lean-monorepo:ci .
 
       # Mede o tamanho real da imagem e falha acima do teto, para travar regressão de layers.
       - name: Image size

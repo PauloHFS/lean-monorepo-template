@@ -10,7 +10,11 @@
 # =============================================================================
 
 # ---- Stage 1: front ---------------------------------------------------------
-FROM node:24-alpine AS build-web
+# A versão do Node vem de `.node-version` (fonte única): o CI passa
+# `--build-arg NODE_VERSION=$(cat .node-version)`. O default é só fallback e
+# um guard no CI falha se ele divergir do arquivo.
+ARG NODE_VERSION=24
+FROM node:${NODE_VERSION}-alpine AS build-web
 WORKDIR /web
 # browsers do Playwright nao sao necessarios no build do Vite
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
@@ -23,7 +27,7 @@ RUN npm run build
 # ---- Stage 2: dependências Python (toolchain só existe aqui) ----------------
 FROM python:3.12-slim AS build-api
 
-COPY --from=ghcr.io/astral-sh/uv:0.10.10 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /uvx /bin/
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

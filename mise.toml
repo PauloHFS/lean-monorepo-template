@@ -6,7 +6,13 @@
 #
 # As tasks continuam no `justfile`: o mise fixa versões, o just roda os
 # ~30 comandos do projeto.
+#
+# Node NÃO entra em [tools]: a versão mora em `.node-version` (fonte única,
+# também lida pelo Docker e pelo CI). Abaixo o mise é habilitado a ler esse
+# arquivo idiomaticamente.
+[settings]
+idiomatic_version_file_enable_tools = ["node"]
+
 [tools]
-node = "24"
 just = "1"
-uv = "0.10"
+uv = "0.13"
