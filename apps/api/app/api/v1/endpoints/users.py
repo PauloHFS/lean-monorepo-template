@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from opentelemetry import trace
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import CursorResult, text
 
 from app.api.deps import DB, CurrentUser
@@ -19,8 +19,8 @@ router = APIRouter()
 
 class EnqueueEmailIn(BaseModel):
     to: EmailStr
-    subject: str
-    body: str
+    subject: str = Field(max_length=200)
+    body: str = Field(max_length=100_000)
 
 
 class EnqueueEmailOut(BaseModel):
@@ -30,7 +30,11 @@ class EnqueueEmailOut(BaseModel):
 
 @router.get("", response_model=list[UserOut])
 async def list_users(
-    _: CurrentUser, session: DB, limit: int = 50, offset: int = 0
+    _: CurrentUser,
+    session: DB,
+    # Teto de 100 evita varredura/payload descontrolado num endpoint autenticado.
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
 ) -> list[UserOut]:
     rows = (
         (

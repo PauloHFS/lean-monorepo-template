@@ -26,13 +26,19 @@ router = APIRouter()
 
 class RegisterIn(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8)
-    full_name: str | None = None
+    # min_length vem de settings (não hardcode) para não divergir de hash_password;
+    # max_length=72 em CARACTERES porque bcrypt trunca em 72 BYTES — aceitar mais
+    # geraria o hash de uma senha que só existe truncada.
+    password: str = Field(min_length=settings.password_min_length, max_length=72)
+    full_name: str | None = Field(default=None, max_length=200)
 
 
 class LoginIn(BaseModel):
     email: EmailStr
-    password: str
+    # SEM max_length de propósito: usuários com senha >72 chars criados antes
+    # desta validação precisam continuar logando (verify_password trunca nos
+    # dois lados). Adicionar max_length aqui quebraria login legado.
+    password: str = Field(min_length=settings.password_min_length)
 
 
 class LoginOut(BaseModel):

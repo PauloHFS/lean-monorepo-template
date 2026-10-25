@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import CursorResult, text
 from webauthn import base64url_to_bytes
 
@@ -32,7 +32,8 @@ class TotpSetupOut(BaseModel):
 
 
 class TotpConfirmIn(BaseModel):
-    code: str
+    # Confirmação de setup: aqui só vale TOTP de 6 dígitos.
+    code: str = Field(pattern=r"^\d{6}$")
 
 
 class TotpConfirmOut(BaseModel):
@@ -41,8 +42,9 @@ class TotpConfirmOut(BaseModel):
 
 
 class TwoFactorVerifyIn(BaseModel):
-    pending_token: str
-    code: str  # TOTP code OU recovery code
+    pending_token: str = Field(min_length=16, max_length=128)
+    # TOTP (6 dígitos) OU recovery code (10 chars [a-z0-9]) — sem pattern fixo.
+    code: str = Field(min_length=6, max_length=64)
 
 
 class OkOut(BaseModel):
@@ -268,12 +270,14 @@ class PasskeyAuthenticationCredential(PasskeyCredentialBase):
 
 
 class PasskeyRegisterIn(BaseModel):
-    challenge: str  # "challenge_b64:pending_token" retornado nas options
+    # "challenge_b64:pending_token" (~77 chars); folga para variações.
+    challenge: str = Field(min_length=8, max_length=1024)
     credential: PasskeyRegistrationCredential
 
 
 class PasskeyLoginIn(BaseModel):
-    challenge: str  # "challenge_b64:pending_token" retornado nas options
+    # "challenge_b64:pending_token" (~77 chars); folga para variações.
+    challenge: str = Field(min_length=8, max_length=1024)
     credential: PasskeyAuthenticationCredential
 
 
@@ -465,7 +469,7 @@ async def passkey_login_verify(
 
 
 class PendingIn(BaseModel):
-    pending_token: str
+    pending_token: str = Field(min_length=16, max_length=128)
 
 
 # Funções expostas para auth.login saber se o user tem 2FA habilitado
