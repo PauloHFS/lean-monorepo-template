@@ -2,6 +2,8 @@
  * Helpers tipados por endpoint. Usa os types do schema OpenAPI gerado.
  * Para regenerar: `just web-types`.
  */
+
+import { api } from './client'
 import type {
   EnqueueEmailIn,
   EnqueueEmailOut,
@@ -19,8 +21,6 @@ import type {
   TwoFactorVerifyIn,
   UserOut,
 } from './types'
-
-import { api } from './client'
 
 export const AuthApi = {
   me: () => api.get<UserOut>('/api/v1/auth/me'),

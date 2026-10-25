@@ -1,10 +1,9 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "root": "../.." },
   "files": {
     "ignoreUnknown": true,
-    "include": ["**"],
-    "ignore": ["src/api/schema.d.ts"]
+    "includes": ["**", "!**/src/api/schema.d.ts", "!**/public"]
   },
   "formatter": {
     "enabled": true,
@@ -16,11 +15,35 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "suspicious": {
         "noExplicitAny": "error",
-        "noConsoleLog": "error",
-        "useAwait": "error"
+        "useAwait": "error",
+        "noConsole": {
+          "level": "error",
+          "options": {
+            "allow": [
+              "assert",
+              "clear",
+              "count",
+              "debug",
+              "dir",
+              "dirxml",
+              "error",
+              "group",
+              "groupCollapsed",
+              "groupEnd",
+              "info",
+              "table",
+              "time",
+              "timeEnd",
+              "timeLog",
+              "trace",
+              "warn"
+            ]
+          }
+        },
+        "noUnknownAtRules": "off"
       },
       "style": {
         "useImportType": "error",
@@ -47,10 +70,7 @@
       "arrowParentheses": "always"
     }
   },
-  "json": {
-    "formatter": { "indentWidth": 2, "trailingCommas": "none" }
-  },
-  "organizeImports": {
-    "enabled": true
-  }
+  "json": { "formatter": { "indentWidth": 2, "trailingCommas": "none" } },
+  "css": { "parser": { "tailwindDirectives": true } },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } }
 }
