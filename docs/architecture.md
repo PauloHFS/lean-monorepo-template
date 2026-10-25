@@ -446,6 +446,50 @@ morriam no container) e a resposta não trazia identificador de trace.
 
 ---
 
+## AD-017 · Passkeys na lib `webauthn` (duo-labs) com credential JSON padrão
+
+**Status**: current.
+
+**Context**: o backend pinava `py_webauthn==0.0.6` — o fork `as207960/python-webauthn`
+(MIT, últimos releases 0.0.1–0.0.6, projeto abandonado). Mas o código foi escrito
+contra a API moderna: usava `result.credential_id` e `result.new_sign_count`, que
+**não existem** na 0.0.6 (lá são `attestation...credential_id` e `sign_count`) →
+`AttributeError` em runtime nos dois fluxos de passkey. Pior: em 0.0.6
+`result.public_key` é um objeto `cryptography`, não bytes → o insert em
+`user_passkeys.public_key` (BYTEA) e o `bytes(pk["public_key"])` no login também
+estavam errados. A linha legada ainda exigia `certvalidator`→`oscrypto`, e por causa
+de um regex de versão do oscrypto 1.3.0 o repo fixava um tarball do GitHub
+(hack que quebrava no Linux).
+
+**Decision**:
+- Trocar para `webauthn==3.0.1` (`duo-labs/py_webauthn`, BSD-3, Python >=3.10,
+  `py.typed`). Mesmo import name (`webauthn`), mesmas deps sem
+  `certvalidator`/`oscrypto` → o tarball do `oscrypto` sai do `pyproject.toml`.
+- Contrato: o browser envia o **credential JSON padrão** (`id`, `rawId`, `type`,
+  `response.clientDataJSON` e `response.attestationObject`/`authenticatorData`/`signature`,
+  tudo em base64url **sem padding** — `btoa` puro gera `+/=` e a lib rejeita) em vez
+  de 3-4 campos base64 separados. As options voltam como dict camelCase
+  (`options_to_json_dict`).
+- Challenge: gerado pela lib, **guardado no pending** (TTL 300s, consumo único) e
+  comparado com o enviado no verify — o cliente não é fonte de verdade do challenge.
+- Lookup: a passkey é buscada e atualizada **por `credential_id`** (não mais
+  `SELECT ... WHERE user_id LIMIT 1` com `UPDATE` por user_id).
+- `public_key` passa a ser o COSE cru de `credential_public_key` → continua BYTEA,
+  **sem migration**.
+
+**Consequences**:
+- A lib mantida tem `py.typed`: os casts/`import_module` do adapter saem e os
+  warnings de stub desaparecem.
+- Os 4 endpoints de passkey mudam de contrato (schemas Pydantic + payload do
+  frontend) → `apps/web/src/api/schema.d.ts` regenerado.
+- `expected_origin` passa a ser `settings.web_origin` (igualdade exata) e `rp_id` o
+  hostname sem porta — checks independentes, como manda a spec.
+- Limite conhecido: attestation/assertion reais não são exercitados em teste
+  automatizado (não há authenticator no CI) — o round-trip precisa de validação
+  manual no browser.
+
+---
+
 ## Future ADs (open questions)
 
 - _(none open — all shipped infra is documented above; product-level decisions like
