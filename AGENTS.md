@@ -12,7 +12,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 ## 2. Arquitetura
 
 - **Backend (`/apps/api`)**: Python 3.12 gerenciado por `uv`, FastAPI, Pydantic v2, SQLAlchemy 2.0 assíncrono/Core, Alembic, Procrastinate e PostgreSQL.
-- **Frontend (`/apps/web`)**: TypeScript strict, React 18, Vite 8 (Rolldown/Oxc), Tailwind CSS, Biome e tipos gerados do OpenAPI. Node 24 é o piso do front (o Node 20 está EOL e o Vite 8 exige `^20.19 || >=22.12`).
+- **Frontend (`/apps/web`)**: TypeScript strict, React 19, Vite 8 (Rolldown/Oxc), Tailwind CSS 4, Biome e tipos gerados do OpenAPI. Node 24 é o piso do front (o Node 20 está EOL e o Vite 8 exige `^20.19 || >=22.12`); a versão mora em `.node-version`.
 - **Princípio arquitetural**: PostgreSQL é a única fonte de estado do backend. Cache, filas, sessões e rate limiting pertencem ao PostgreSQL; não introduza Redis, Celery ou outro serviço sem uma nova ADR.
 - **Princípio de interface**: toda rota nova possui contrato Pydantic de entrada e saída; o frontend consome os tipos gerados pelo OpenAPI.
 
@@ -24,7 +24,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - Prefira a biblioteca padrão, uma dependência já instalada ou um helper local. Não crie abstração ou dependência especulativa.
 - O gerenciador de pacotes Python é o `uv`: dependências ficam em `apps/api/pyproject.toml` (pins exatos) e as versões resolvidas em `apps/api/uv.lock`. Não reintroduza `pip install`, `requirements.txt` nem venv manual.
 - Use `uv sync` para preparar `apps/api/.venv` e `uv run <comando>` para executar ferramentas e scripts. Em CI use `uv sync --locked`; rode `uv lock` e versione o `uv.lock` junto de qualquer mudança no `pyproject.toml`.
-- As versões das ferramentas de dev estão em `mise.toml` (Node 24, just, uv): `mise install` prepara o ambiente. O Python é do `uv` — não declare `python` no mise, e as tasks continuam no `justfile`.
+- As versões das ferramentas de dev estão em `mise.toml` (just, uv): `mise install` prepara o ambiente. A versão do Node tem fonte única em `.node-version` — o `mise.toml` não a duplica (só habilita a leitura do arquivo), o CI usa `node-version-file` e o Docker passa `NODE_VERSION` como build-arg. O Python é do `uv` — não declare `python` no mise, e as tasks continuam no `justfile`.
 - Mantenha o lockfile `apps/web/package-lock.json` atualizado ao mexer em dependências npm.
 - Rode a auditoria após mudar dependências: `just api-audit` (pip-audit via `uvx`, dependências de produção do backend) e `just web-audit` (npm audit de produção).
 
@@ -46,8 +46,8 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 ### Validação de entrada (schemas)
 
 - Todo schema de entrada declara suas constraints no Pydantic v2 (`Field(min_length=..., max_length=..., pattern=...)`); paginação usa `Query(ge=..., le=...)`. A fronteira é o backend — o Zod do front é conveniência, não garantia.
-- `RegisterIn.password` usa `settings.password_min_length` como fonte única do mínimo, com `max_length=72` (o bcrypt trunca em 72 **bytes**).
-- `LoginIn.password` fica **sem** `max_length`: o truncamento do bcrypt acontece nos dois lados, então limitar o login quebraria usuários legados com senha >72 chars. Endurecer a entrada viraria um outage.
+- `RegisterIn.password` usa `settings.password_min_length` como fonte única do mínimo, com `max_length=72` (o **repo** trunca em 72 **bytes**; o bcrypt 5.x rejeita acima de 72, não trunca).
+- `LoginIn.password` fica **sem** `max_length`: o truncamento acontece nos dois lados, então limitar o login quebraria usuários legados com senha >72 chars. Endurecer a entrada viraria um outage.
 - `TwoFactorVerifyIn.code` aceita TOTP (6 dígitos) **ou** recovery code (10 chars): não aplique pattern de 6 dígitos ali. O `^\d{6}$` é só do `TotpConfirmIn` (confirmação de setup).
 - Entrada inválida responde **422**, não 401. Constraint não aparece no `schema.d.ts` (o openapi-typescript descarta `minLength`/`maxLength`/`pattern` de campo escalar): ela vale no servidor, e o `check-schema` continua sendo o gate de contrato.
 
@@ -60,10 +60,18 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - `noConsoleLog` **não existe** na 2.x: a regra é `noConsole` e ela bloqueia **todo** `console.*` por padrão. O config lista em `options.allow` todos os métodos **exceto** `log` — o mapeamento fiel do `noConsoleLog`. Se alguém inverter essa lista, o gate de `console.log` some em silêncio.
 - `vcs.root: "../.."` é obrigatório: a 2.x não sobe a árvore atrás do `.gitignore` e aborta com "couldn't find an ignore file" sem isso.
 - `files.includes` = `["**", "!**/src/api/schema.d.ts", "!**/public"]`: o schema gerado fica fora e o `public/` também (a 2.x passou a parsear SVG e `a11y/noSvgWithoutTitle` disparava no `favicon.svg`).
-- Tailwind 3 exige `css.parser.tailwindDirectives: true` e `noUnknownAtRules: "off"` (para `@tailwind`/`@apply`).
+- Tailwind 4 exige `css.parser.tailwindDirectives: true` (para `@theme`/`@utility`/`@apply`) e `noUnknownAtRules: "off"`.
 - `noFloatingPromises`/`noMisusedPromises` são **nursery** na 2.6.3: não vêm com `recommended` e não estão ligadas.
 - `src/api/schema.d.ts` é gerado e fica fora do lint.
 - Rode `just web-lint` antes de submeter; `just web-lint-fix` aplica as correções automáticas (as *unsafe* de `noUnusedVariables`/`noUnusedImports` precisam de `--unsafe` e não são aplicadas).
+
+### Toolchain do front
+
+- A versão do Node tem **fonte única** em `.node-version` (24). O `mise.toml` só habilita a leitura do arquivo (`[settings] idiomatic_version_file_enable_tools = ["node"]` — sem isso o mise ignora o `.node-version`); o CI usa `node-version-file` e o Docker passa `NODE_VERSION` como build-arg. Um guard no CI falha se o default do `ARG` divergir do arquivo. Não reescreva a versão em outro lugar.
+- `apps/web/package.json` declara `engines.node: ">=24"` e `apps/web/.npmrc` liga `engine-strict=true`: dev com Node antigo recebe `EBADENGINE` na install, não stack trace no dev server.
+- **Tailwind 4 é CSS-first**: não existe `tailwind.config.js` nem `postcss.config.js` (o plugin é `@tailwindcss/vite` no `vite.config.ts`). O tema vive em `@theme` no `src/index.css` (`--color-brand-*`, `--font-sans`) e as classes do design system em `@utility` — no v4, `@apply` de classe customizada é erro fatal.
+- No v4, `shadow-sm` é o antigo `shadow` (use `shadow-xs` para o antigo `shadow-sm`) e `outline-none` remove o outline de verdade (use `outline-hidden`).
+- O `overrides` de `@hookform/resolvers` (`effect: 4.0.0`) existe porque o npm 11 auto-resolve a cadeia opcional `@typeschema/*`/`@effect/schema` (que exige Effect 3.x) e quebra a install limpa com `ERESOLVE`. Não remova sem testar `npm ci` do zero.
 
 ### Banco de dados
 
@@ -160,6 +168,7 @@ Use a menor matriz que cubra a mudança e rode `just ci` antes de submeter alter
 | Fluxo E2E | `just e2e` (pula o que exige backend) · `just e2e-mock` (só mocks; é o que o CI roda) · `just e2e-full` (stack real) |
 | Schema Pydantic, rota ou contrato OpenAPI | `just web-types && just check-schema` (o `check-schema` falha se alguma resposta de rota ficar sem contrato tipado) |
 | Dependências Python ou npm | `just api-audit` e `just web-audit` |
+| Versão do Node ou toolchain | `mise install` + `mise ls` (fonte única em `.node-version`) + `npm ci` limpo (o `overrides` do `@hookform/resolvers` só se prova com install do zero) |
 | Qualquer alteração de código coberta pelas regras do `semgrep.yml` | `just semgrep` |
 | Dockerfile, compose ou entrypoint | `just validate-compose` + `bash -n scripts/entrypoint.sh` (sem daemon: `docker compose config --quiet`; o build real e o teto de tamanho da imagem são do job `docker` do CI) |
 | Backup ou restauração | `bash -n scripts/backup.sh scripts/restore.sh scripts/test-restore.sh` + `just test-restore` (exige Postgres + client no PATH) |

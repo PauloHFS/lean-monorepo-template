@@ -773,6 +773,147 @@ era de dev server e de runtime sem patch, não de bundle.
 
 ---
 
+## AD-024 · Tailwind 4 (CSS-first) e React 19 no front
+
+**Status**: current.
+
+**Context**: o front estava no Tailwind 3.4.17 e no React 18.3.1. O Tailwind 3
+carregava 3 advisories moderate (cadeia `postcss-selector-parser` →
+`postcss-nested` → `tailwindcss`) cujo único fix é o Tailwind 4 — breaking, e
+portanto nunca ia entrar num bump automático. O React 18 seguia na série
+mantida, mas o 19 já era o `latest` e nenhuma dependência do repo o bloqueava.
+
+**Decision**:
+- **Tailwind 4.3.3 no modo CSS-first**: o plugin `@tailwindcss/vite` entra no
+  `vite.config.ts` e `tailwind.config.js` e `postcss.config.js` são **deletados**
+  (o `postcss` e o `autoprefixer` saem do `package.json`: no v4 o import e o
+  prefixo de vendor são do próprio Tailwind). O tema sai do JS para o CSS
+  (`@theme` com `--color-brand-*` e `--font-sans`) e as 5 classes do design
+  system (`.btn`, `.btn-primary`, `.btn-ghost`, `.input`, `.card`) viram
+  `@utility` — no v4 `@apply` de classe **customizada** é erro fatal, e
+  `@apply` de utility core dentro de `@layer components` continua funcionando.
+- **React 19.3.1** (+ `@types/react` 19.3.0, `@types/react-dom` 19.3.0). O repo
+  não usa `useRef`, `forwardRef`, `React.FC`, `JSX.Element` global, `useReducer`
+  com genérico nem `defaultProps` — que são os breaks reais do 19.
+- Bumps menores no mesmo passo: `react-hook-form` 7.91.0, `@hookform/resolvers`
+  6.0.0 (o breaking é só no resolver de Effect; usamos `zodResolver`) e
+  `@playwright/test` 1.64.1.
+- **Ficam de fora, de propósito**: `typescript` (5.9.3 — o 7.0.2 é o port nativo
+  em Go sem compiler API e o 6.x muda defaults que exigem revisão do
+  `tsconfig`) e `react-router` (7.18.4 — o 8.5.0 saiu há dias e exige React
+  ≥19.2.7; a série 7 ainda tem peer React ≥18).
+
+**Consequences**:
+- O `npm audit` completo ficou em **0 vulnerabilidades** (as 3 moderate do
+  Tailwind 3 sumiram) e o gate de produção segue em 0.
+- Paridade visual exige dois ajustes: no v4 `shadow-sm` é o antigo `shadow` (o
+  antigo `shadow-sm` virou `shadow-xs`) e `outline-none` agora remove o outline
+  de verdade (o antigo virou `outline-hidden`). Ambos foram aplicados nas
+  `@utility`.
+- O CSS grew (11,67 → 16,20 kB) porque o v4 emite o tema inteiro como custom
+  properties; o JS cresceu com o React 19 (331,14 → 413,36 kB; gzip 106,64 →
+  130,40 kB).
+- O `package.json` ganhou um `overrides` mínimo
+  (`{"@hookform/resolvers": {"effect": "4.0.0"}}`): sem ele o npm 11 auto-resolve
+  a cadeia opcional `@typeschema/*`/`@effect/schema`, que exige Effect 3.x, e a
+  install limpa quebra com `ERESOLVE`. A alternativa seria `--legacy-peer-deps`
+  em toda install.
+- `useTailwindSortedClasses` (Biome 2.x, nursery) **não** foi ligada: ela passa a
+  entender a semântica do v4, mas gera churn de reordenação de classes nos pages.
+- O Biome 2.6.3 parseia `@theme`/`@utility` sem config extra
+  (`css.parser.tailwindDirectives: true` continua no `biome.json`).
+
+---
+
+## AD-025 · Versão do Node com fonte única (`.node-version`) e `uv` 0.13
+
+**Status**: current.
+
+**Context**: a versão do Node aparecia em três lugares (a tag `node:24-alpine`
+do Dockerfile e o `node-version` de 3 jobs do CI) e nenhuma era a fonte de
+verdade — trocar o Node exigia três edições e nenhuma detectava drift. O `mise`
+existia com `node = "24"` dentro de `[tools]`, o que criava uma quarta cópia. O
+`uv` pinado no Dockerfile estava na 0.10.10 com a 0.13.5 já publicada.
+
+**Decision**:
+- **`.node-version` (24) é a fonte única.** O `mise.toml` não duplica a versão:
+  ele só habilita a leitura do arquivo idiomático
+  (`[settings] idiomatic_version_file_enable_tools = ["node"]`) — sem isso o
+  mise 2026.5.9 **ignora** o `.node-version`. O CI usa
+  `node-version-file: .node-version` nos 3 jobs e o Dockerfile passa
+  `NODE_VERSION` como build-arg (`ARG NODE_VERSION=24` é só o fallback).
+- Um **guard de drift** no CI compara o `.node-version` com o default do `ARG`
+  no Dockerfile e falha se divergirem.
+- `apps/web/package.json` declara `engines.node: ">=24"` e `apps/web/.npmrc`
+  liga `engine-strict=true`: um dev com Node antigo recebe `EBADENGINE` na
+  install, não um stack trace no dev server.
+- `uv` 0.13.5 no Dockerfile (`ghcr.io/astral-sh/uv:0.13.5`) e `uv = "0.13"` no
+  `mise.toml`.
+
+**Consequences**:
+- Trocar a versão do Node é uma edição em um arquivo; mise, Docker e CI leem
+  dele. O `ARG NODE_VERSION` continua no repositório (a tag da imagem Docker é
+  externa por definição), mas o guard impede que ele vire uma cópia silenciosa.
+- `engine-strict` derruba a install se **qualquer** dependência declarar `engines`
+  incompatível — hoje nenhuma declara.
+- O mise 2026.5.9 não aceita `node = "node:.node-version"` nem `"file:..."`: o
+  caminho do request syntax é o prefixo `path:`, que **não** ativa o binário.
+  A solução é o setting de version file idiomático.
+- uv 0.13.x muda o default do Python para 3.15 quando nenhum é pedido — não
+  afeta este projeto, que fixa 3.12 (`.python-version` + `requires-python`).
+
+---
+
+## AD-026 · Dependências do backend atualizadas (bcrypt 5, FastAPI 0.162, SQLAlchemy 2.0.55)
+
+**Status**: current.
+
+**Context**: o backend estava 2 a 6 versões atrás em 18 pacotes: FastAPI 0.142.2
+(0.162.0 no `latest`), Pydantic 2.10.3 (2.14.1), SQLAlchemy 2.0.36 (2.0.55 na
+série 2.0; 2.1.6 na série 2.1), Alembic 1.14.0 (1.20.1), bcrypt 4.2.1 (5.0.0),
+uvicorn 0.32.1 (0.54.0), structlog 24.4.0 (26.1.0), sentry-sdk 2.19.2 (2.73.0),
+ruff 0.8.4 (0.17.2), pytest 9.0.3 (9.1.1), bandit 1.8.6 (1.9.4). Duas
+dependências estavam **declaradas e sem uso**: `python-multipart` e
+`itsdangerous` (esta última é transitiva do Starlette).
+
+**Decision**:
+- Subir as 18 versões no `pyproject.toml` (pins exatos) e regerar o `uv.lock`
+  (92 → 90 pacotes: 18 upgrades, 2 remoções).
+- **Remover `python-multipart` e `itsdangerous`**: nenhum `Form`/`File`/
+  `UploadFile` no app (a sessão é um token opaco, não um cookie assinado) e a
+  `itsdangerous` chega pelo Starlette.
+- **SQLAlchemy 2.0.55, não 2.1.6**: o `opentelemetry-instrumentation-sqlalchemy`
+  declara `sqlalchemy<2.1.0` e os autores do instrumentor não testam a série
+  2.1 — e o repo instrumenta o engine (AD-016). A série 2.0.x ainda é mantida.
+- **Python continua 3.12** (EOL só em out/2028): trocar de interpreter exige
+  reescrever `requires-python`, `.python-version`, `ruff.target-version`,
+  `pyrightconfig.json` e **os dois** `FROM` do Dockerfile (o venv referencia o
+  interpretador por symlink absoluto) — mudança própria, não um bump.
+- Alembic 1.16 trocou `version_path_separator` por `path_separator`: o
+  `alembic.ini` foi atualizado para não emitir warning.
+
+**Consequences**:
+- **bcrypt 5.0.0 agora rejeita senhas acima de 72 bytes** (`ValueError`) em vez
+  de truncar em silêncio. O repo **já truncava** em 72 bytes antes de chamar a
+  lib (`core/security.py`), então hash e verificação continuam consistentes —
+  o que muda é o texto: "o repo trunca; o bcrypt 5.x rejeita acima de 72 bytes".
+  Um `hash_password` sem truncamento passaria a estourar `ValueError`.
+- O `OpenAPI` gerado ficou **byte-idêntico** (33.514 bytes antes e depois): o
+  Pydantic ≥2.11 passou a emitir `additionalProperties: true` para
+  `dict[str, Any]`, mas nenhum `response_model` do repo usa `dict` — todos são
+  models explícitos (AD-018). `apps/web/src/api/schema.d.ts` não mudou.
+- O ruff 0.17.2 promoveu `PLR0917` (too many positional arguments) de preview
+  para estável: `app/jobs/tasks/email.py` (6 posicionais: `ctx` + payload da
+  fila) ganhou um `per-file-ignore` explícito.
+- O pyotp 2.10 tipa `provisioning_uri(**kwargs)` sem anotação → `Unknown` no
+  Pyright strict: o `app/core/totp.py` ganhou um
+  `# pyright: ignore[reportUnknownMemberType]` na chamada (o `cast` não resolve,
+  vira `reportUnnecessaryCast`).
+- `pip-audit` continua em "No known vulnerabilities found" e o `uv lock --check`
+  passa. A auditoria de produção do front segue em 0.
+
+---
+
 ## Future ADs (open questions)
 
 - _(none open — all shipped infra is documented above; product-level decisions like

@@ -2,9 +2,9 @@
 
 Template enxuto de monoprojeto com:
 
-- **Backend** Python 3.12 + FastAPI + SQLAlchemy 2.x async + Alembic
+- **Backend** Python 3.12 + FastAPI 0.162 + SQLAlchemy 2.0 async + Alembic 1.20
 - **Worker** [Procrastinate](https://procrastinate.readthedocs.io/) 3.10.0 (Postgres-only, mesma imagem da API)
-- **Frontend** React 18 + TypeScript + Vite 8 + Tailwind + React Router 7
+- **Frontend** React 19 + TypeScript + Vite 8 + Tailwind 4 + React Router 7
 - **Tipos ponta a ponta** via `openapi-typescript` (regenerados com `just web-types`)
 - **2FA** opcional: TOTP (Google Authenticator) + passkey (WebAuthn/Touch ID)
 - **Rate limit** em `/auth/login` e `/auth/register` (Postgres, sem Redis)
@@ -112,7 +112,7 @@ Pra rodar api+worker+web paralelos num comando só: `just dev`.
 >
 > O Python do backend é gerenciado por `uv` — instale com `brew install uv` ou `curl -LsSf https://astral.sh/uv/install.sh | sh`. As deps ficam em `apps/api/pyproject.toml` (pins exatos) e `apps/api/uv.lock` é a fonte de verdade das versões.
 >
-> O front usa **Node 24** (o Node 20 está EOL e o Vite 8 exige `^20.19 || >=22.12`). As versões das ferramentas de dev estão no `mise.toml` — `mise install` prepara Node, just e uv na versão certa.
+> O front usa **Node 24**, e a versão mora só no `.node-version` — o mise, o Docker (build-arg) e o CI (`node-version-file`) leem dele. O Node 20 está EOL e o Vite 8 exige `^20.19 || >=22.12`. As demais ferramentas de dev estão no `mise.toml` — `mise install` prepara Node, just e uv na versão certa.
 
 ---
 
@@ -183,7 +183,7 @@ Recovery codes são aceitos no lugar do TOTP (caso o usuário perca o app).
 
 ## Auth
 
-- Senha: **bcrypt** (custo 12, via lib `bcrypt` direto).
+- Senha: **bcrypt** (custo 12, via lib `bcrypt` direto). O repo trunca a senha em 72 **bytes** antes de chamar a lib — o bcrypt 5.x **rejeita** acima de 72 bytes em vez de truncar.
 - Sessão: **token opaco** em cookie `HttpOnly`, `SameSite=Lax`, `Secure` em prod.
 - O cookie armazena o token cru; o banco guarda `sha256(token)` em `sessions.token_hash` (índice unique).
 - Logout = `DELETE FROM sessions WHERE token_hash = …` → revogação instantânea.
@@ -366,9 +366,10 @@ Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, 
 - **Boot**: papéis `migrate` (one-shot, roda a migration) | `api` | `worker`. Só o `migrate` roda `alembic upgrade head` — api/worker esperam ele terminar.
 - **Backup/restore**: `just backup-now` (host, exige `pg_dump`/`rclone`), `just test-restore` (prova de restauração), `./scripts/restore.sh <dump> --db <alvo> --yes`.
 - **Dependências Python**: `uv` + `apps/api/uv.lock` (fonte de verdade); pins exatos em `apps/api/pyproject.toml`. `apps/api/requirements.txt` não existe mais. `just api-install` roda `uv sync`; `just api-audit` audita as deps de produção (pip-audit via `uvx`).
+- **Toolchain do front**: Node 24 com **fonte única** em `.node-version` (o mise, o Docker via build-arg e o CI via `node-version-file` leem dele; `engines` + `engine-strict` no `package.json` derrubam a install com Node antigo). Tailwind 4 é **CSS-first**: o tema vive em `@theme` no `src/index.css` e as classes do design system em `@utility` — não existe `tailwind.config.js` nem `postcss.config.js`.
 - **Segredos**: NUNCA comitar `.env`. Em prod, monte via secret manager do orquestrador.
 - **Logs**: `structlog` JSON em prod, console em dev (stderr pra não poluir stdout).
-- **Tests**: `just test` roda a suite de 114 testes. Tudo que não precisa de DB.
+- **Tests**: `just test` roda a suite de 124 testes. Tudo que não precisa de DB.
 - **E2E**: `just e2e-mock` roda só os cenários mockados (`page.route`, sem API/DB — é o que o CI roda); `just e2e` roda a suíte inteira pulando o que precisa de backend; `just e2e-full` sobe o stack e roda contra a SPA servida pela API em `:8000`.
 
 ---
