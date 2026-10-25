@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "gen:api": "openapi-typescript ../api/openapi.json -o src/api/schema.d.ts",
-    "lint": "biome check",
+    "lint": "biome check --error-on-warnings",
     "lint:fix": "biome check --write",
     "format": "biome format",
     "format:fix": "biome format --write",

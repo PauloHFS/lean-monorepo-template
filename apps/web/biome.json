@@ -3,7 +3,7 @@
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
     "ignoreUnknown": true,
-    "include": ["src/**", "e2e/**", "*.{ts,tsx,js,jsx,json}"],
+    "include": ["**"],
     "ignore": ["src/api/schema.d.ts"]
   },
   "formatter": {
@@ -18,15 +18,23 @@
     "rules": {
       "recommended": true,
       "suspicious": {
-        "noExplicitAny": "warn",
-        "noConsoleLog": "warn"
+        "noExplicitAny": "error",
+        "noConsoleLog": "error",
+        "useAwait": "error"
       },
       "style": {
-        "useImportType": "warn",
-        "useNamingConvention": "off"
+        "useImportType": "error",
+        "useNamingConvention": "off",
+        "noNonNullAssertion": "error",
+        "noParameterAssign": "error",
+        "noUselessElse": "error"
       },
       "correctness": {
-        "useExhaustiveDependencies": "warn"
+        "useExhaustiveDependencies": "error",
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error",
+        "noUnusedFunctionParameters": "error",
+        "noUndeclaredVariables": "error"
       }
     }
   },

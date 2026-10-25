@@ -1,5 +1,5 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite'
 
 // Em dev, o front roda em :5173 e a API em :8000. Vite proxia /api -> API.
 // Em produção, o front é buildado para /apps/web/dist e servido pelo próprio
@@ -10,16 +10,16 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      "/api": {
-        target: "http://localhost:8000",
+      '/api': {
+        target: 'http://localhost:8000',
         changeOrigin: false,
         secure: false,
       },
     },
   },
   build: {
-    outDir: "dist",
+    outDir: 'dist',
     sourcemap: true,
-    target: "es2022",
+    target: 'es2022',
   },
-});
+})
