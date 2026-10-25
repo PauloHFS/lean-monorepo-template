@@ -25,9 +25,9 @@ _BCRYPT_MAX_PASSWORD_BYTES = 72  # limite do algoritmo
 
 
 def _to_bytes(plain: str) -> bytes:
-    # bcrypt trunca em 72 bytes internamente sem erro, mas prefiro truncar
-    # explicitamente para evitar divergência entre hash e check em senhas com
-    # caracteres multibyte (ex.: pt-BR com emoji).
+    # bcrypt 5.x rejeita (>72 bytes -> ValueError) em vez de truncar em silêncio.
+    # Truncamos explicitamente para manter hash e check consistentes em senhas
+    # com caracteres multibyte (ex.: pt-BR com emoji).
     return plain.encode("utf-8")[:_BCRYPT_MAX_PASSWORD_BYTES]
 
 

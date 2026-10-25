@@ -51,7 +51,11 @@ def decrypt_secret(token: bytes) -> str:
 
 def provisioning_uri(secret: str, account: str) -> str:
     """URI `otpauth://` que o cliente converte em QR."""
-    return pyotp.TOTP(secret).provisioning_uri(name=account, issuer_name=_ISSUER)
+    # pyotp 2.10 tipa `**kwargs` sem anotação (Unknown), e o pyright strict
+    # reprova o retorno por isso; a assinatura real continua devolvendo str.
+    return pyotp.TOTP(secret).provisioning_uri(  # pyright: ignore[reportUnknownMemberType]
+        name=account, issuer_name=_ISSUER
+    )
 
 
 def verify_totp(secret: str, code: str, valid_window: int = 1) -> bool:
