@@ -31,11 +31,25 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 
 - O backend roda Pyright em `strict` (`apps/api/pyrightconfig.json`, sem lista de `ignore`). Todo código novo passa em `uv run pyright app tests` com 0 erros; não reintroduza exclusões de arquivo nem `# type: ignore` sem motivo explícito.
 - `AsyncSession.execute` é corrotina: isole o `await` (`(await session.execute(...)).mappings().first()`) antes de encadear `.mappings()`/`.first()`/`.scalar*()`. Encadear no `await` quebra em runtime.
-- DML precisa de `cast(CursorResult[Any], await session.execute(...))` para ler `.rowcount`; libs sem stubs (`py-webauthn`, instrumentação OTel) se normalizam na fronteira com `cast`, sem espalhar `Unknown` pelo app.
+- DML precisa de `cast(CursorResult[Any], await session.execute(...))` para ler `.rowcount`; libs sem stubs (instrumentação OTel) se normalizam na fronteira com `cast`, sem espalhar `Unknown` pelo app. A lib de passkey é `webauthn==3.0.1` (tipada, `py.typed`): importe os tipos direto, sem `cast`.
 - TypeScript deve permanecer em modo strict e não usar `any`; prefira `unknown` com narrowing. O aviso do Biome sobre `any` não substitui essa regra.
 - Toda rota nova deve declarar modelos Pydantic de entrada, `response_model` e tipos explícitos para respostas.
+- O `response_model` é um **modelo Pydantic explícito**: `dict[str, Any]` vira `Record<string, never>` no TypeScript e apaga o contrato do front. Na fronteira use `model_validate` (entrada) e `model_dump(exclude_none=True)` (saída).
+- Quando o shape da resposta não pode ganhar campos nulos ou listas vazias, use `response_model_exclude_unset=True`.
 - `apps/web/src/api/schema.d.ts` é gerado. Nunca o edite manualmente; após mudar schemas ou rotas, rode `just web-types` e versione o resultado.
 - Não duplique manualmente contratos que já existem em `src/api/types.ts` ou `src/api/endpoints.ts`. Use Zod para validação de formulários no frontend, não como substituto dos tipos da API.
+- No front, os tipos vêm de `components["schemas"][...]` (reexportados em `src/api/types.ts`). Não redeclare shapes de resposta à mão.
+- `scripts/check-schema-sync.sh` é o gate de contrato: compara o `schema.d.ts` versionado com o OpenAPI atual e falha se alguma **resposta de rota** virar `Record<string, never>`/`unknown`. Rode `just web-types && just check-schema` depois de mexer em rotas ou schemas.
+- WebAuthn: as options chegam em base64url; converta para `BufferSource` com `src/lib/webauthn.ts` (`toRegistrationOptions`/`toAuthenticationOptions`) antes de `navigator.credentials`.
+
+### Lint do frontend (Biome)
+
+- O lint do front é o Biome (`apps/web/biome.json`) e roda como `npm run lint` = `biome check --error-on-warnings`: warning bloqueia igual a erro.
+- As regras que importam estão em `error`: `noExplicitAny`, `noConsoleLog`, `useImportType`, `useExhaustiveDependencies`, `useAwait`, `noUnusedImports`, `noUnusedVariables`, `noUnusedFunctionParameters`, `noUndeclaredVariables`, `noNonNullAssertion`, `noParameterAssign`, `noUselessElse`.
+- `useNamingConvention` fica `off`: o snake_case vem do contrato da API, não do estilo do código.
+- `files.include` é `["**"]`. O glob `*.{ts,tsx,js,jsx,json}` do Biome 1.9.4 **não casa arquivos da raiz** — com ele, `vite.config.ts`, `playwright.config.ts`, `tailwind.config.js` e `postcss.config.js` escapavam do lint.
+- `src/api/schema.d.ts` é gerado e fica fora do lint.
+- Rode `just web-lint` antes de submeter; `just web-lint-fix` aplica as correções automáticas.
 
 ### Banco de dados
 
@@ -44,12 +58,26 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - Modelos ORM (`Mapped[]`) servem ao schema e ao Alembic; queries de runtime servem ao Core.
 - Gere migrations com `just api-revision`, revise o resultado e não edite uma migration já aplicada.
 
+### Filas e jobs
+
+- Jobs entram pela fila do Procrastinate (`send_email.defer_async(...)`), a mesma task que o worker executa. O `trace_context` viaja no payload (`inject_trace_context`).
+- A tabela `background_jobs` é legada e **ninguém consome**: não grave enfileiramentos nela.
+- `job_id` é o id do Procrastinate (inteiro), não um UUID.
+
 ### Testes
 
 - Testes unitários não tocam Postgres (AD-008): o runner SQL é testado como texto, não executado.
 - Validadores, criptografia e rate limiter têm testes de propriedades com Hypothesis (`apps/api/tests/test_properties_*.py`).
 - bcrypt custa ~100 ms por hash: use `@settings(deadline=None, max_examples=...)` ou o Hypothesis vira fábrica de flakes.
 - Não duplique em Python a semântica que mora no SQL; extraia só a parte pura (chave, decisão) e teste isso.
+
+### E2E (Playwright)
+
+- Specs vivem em `apps/web/e2e/` e rodam com `just e2e` (o `playwright.config.ts` sobe o Vite sozinho quando `E2E_BASE_URL` é a porta do Vite).
+- Cenários de falha de autenticação e fluxos assíncronos usam `page.route` (mock): rodam sem API/DB e é isso que o CI executa (`just e2e-mock`).
+- Spec que exige a API real deve **pular** quando ela não estiver disponível (`backendAvailable` em `e2e/helpers.ts`) — falhar por falta de stack esconde regressão real.
+- `just e2e-full` sobe o compose e roda contra a SPA servida pela API em `:8000` (`E2E_BASE_URL=http://localhost:8000`).
+- Use seletores acessíveis (`getByRole`/`getByLabel`); não crie `data-testid` novo.
 
 ### Observabilidade e tracing
 
@@ -76,7 +104,7 @@ As regras acima que dá para checar mecanicamente estão em `semgrep.yml` (raiz)
 | `no-wildcard-cors` | CORS sem origem curinga |
 | `ts-no-explicit-any` | TypeScript strict, sem `any` |
 
-- O scan é local e offline: `semgrep scan --config semgrep.yml --error apps/api/app apps/web/src`. Não use `--config auto` — ele envia languages, frameworks e a URL do projeto ao registry e muda o resultado entre execuções.
+- O scan é local e offline: `semgrep scan --config semgrep.yml --error apps/api/app apps/web/src apps/web/e2e`. Não use `--config auto` — ele envia languages, frameworks e a URL do projeto ao registry e muda o resultado entre execuções.
 - Semgrep é ferramenta de análise, não dependência da aplicação: mantenha fora de `apps/api/pyproject.toml` e instale com `pipx install semgrep` (ou rode via `uvx semgrep`).
 - Ao criar, alterar ou remover uma regra, atualize `semgrep.yml` e esta tabela na mesma mudança.
 - Falso positivo legítimo: suprima com `# nosemgrep: <rule-id>` na linha ou na linha anterior e explique o motivo.
@@ -99,9 +127,9 @@ Use a menor matriz que cubra a mudança e rode `just ci` antes de submeter alter
 | Auth, segurança ou código sensível |Checks anteriores + `just bandit` |
 | Frontend | `just web-typecheck && just web-lint` |
 | Build, bundle ou rotas do frontend | Checks do frontend + `just web-build` |
-| Fluxo E2E | `just e2e` ou `just e2e-full` |
-| Schema Pydantic, rota ou contrato OpenAPI | `just web-types && just check-schema` |
+| Fluxo E2E | `just e2e` (pula o que exige backend) · `just e2e-mock` (só mocks; é o que o CI roda) · `just e2e-full` (stack real) |
+| Schema Pydantic, rota ou contrato OpenAPI | `just web-types && just check-schema` (o `check-schema` falha se alguma resposta de rota ficar sem contrato tipado) |
 | Dependências Python ou npm | `just api-audit` e `just web-audit` |
 | Qualquer alteração de código coberta pelas regras do `semgrep.yml` | `just semgrep` |
 
-`just ci` inclui `just semgrep` (SAST) e as auditorias de dependências, mas não inclui build do frontend, E2E, build Docker ou Trivy; rode esses checks quando a mudança os alcançar. O pre-commit não substitui `just ci`.
+`just ci` inclui `just semgrep` (SAST), as auditorias de dependências e `just e2e-mock`; não inclui build do frontend, E2E contra a stack real, build Docker ou Trivy; rode esses checks quando a mudança os alcançar. O pre-commit não substitui `just ci`.

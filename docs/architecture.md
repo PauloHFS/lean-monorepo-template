@@ -490,6 +490,85 @@ de um regex de versão do oscrypto 1.3.0 o repo fixava um tarball do GitHub
 
 ---
 
+## AD-018 · Contratos tipados ponta a ponta (OpenAPI → TypeScript) e enfileiramento na fila
+
+**Status**: current.
+
+**Context**: a geração de tipos já existia (`just web-types` → `src/api/schema.d.ts`)
+e o CI já comparava bytes, mas o **conteúdo** do schema não era verificado: um
+`response_model` ausente ou um `dict[str, Any]` produz `Record<string, never>` no
+TypeScript e o front seguia consumindo um contrato inexistente. Em quatro rotas isso
+acontecia de fato (`POST /auth/login`, `/2fa/verify`, `/passkey/login/verify` e os
+options/credentials de passkey). O front ainda redeclarava esses shapes à mão e
+castava a resposta (`response as UserOut`), o que zerava `user.email` em runtime.
+Em paralelo, `POST /users/enqueue-email` gravava na tabela `background_jobs`, que é
+**legada e não é consumida por ninguém** — o worker Procrastinate lê a fila própria,
+então o e-mail nunca era enviado.
+
+**Decision**:
+- Toda resposta de rota declara um **modelo Pydantic explícito**; `dict[str, Any]`
+  como `response_model` está proibido (`Record<string, never>`). `LoginOut` e `OkOut`
+  entram em uso; `response_model_exclude_unset=True` no login para o shape não
+  ganhar `pending_token: null`/`methods: []`.
+- `scripts/check-schema-sync.sh` ganha um **gate semântico**: além do diff de bytes,
+  falha se alguma resposta de rota virar `Record<string, never>`/`unknown`.
+- O front consome `components["schemas"][...]` (reexportado em `src/api/types.ts`);
+  tipos manuais de resposta saem.
+- `POST /users/enqueue-email` passa a chamar `send_email.defer_async(...)` — a mesma
+  task do worker e do CLI — e `job_id` vira o id do Procrastinate (inteiro).
+  `background_jobs` deixa de receber enfileiramentos.
+
+**Consequences**:
+- `schema.d.ts` regenerado (`+168/−15`) e o contrato do login/verify passa a ter
+  `properties` de verdade; `apps/api/tests/test_contracts.py` fixa esse contrato.
+- As options WebAuthn são JSON base64url: o front precisa convertê-las para
+  `BufferSource` (`src/lib/webauthn.ts`) — o `navigator.credentials` exige bytes e
+  o fluxo de passkey estava quebrado no browser.
+- O `job_id` muda de `string` para `number` no TypeScript (quebra compatível: o
+  front só exibe o valor).
+- `background_jobs` continua no schema (não há migration) mas fica inerte.
+
+---
+
+## AD-019 · Rigor de lint estrito (Biome) e E2E com mock de rede
+
+**Status**: current.
+
+**Context**: o lint do front rodava `biome check` com as regras relevantes em
+`warn` — ou seja, nada bloqueava. `noExplicitAny` só avisava. O `files.include`
+(`["src/**","e2e/**","*.{ts,tsx,js,jsx,json}"]`) **não casava arquivos da raiz** no
+Biome 1.9.4: `vite.config.ts`, `playwright.config.ts`, `tailwind.config.js` e
+`postcss.config.js` escapavam do lint (medido: "Checked 0 files"). No lado E2E havia
+só 2 specs, ambos exigindo API+DB (o CI não rodava E2E) e o `e2e-full` apontava para
+`:5173`, enquanto o compose serve a SPA pela API em `:8000`.
+
+**Decision**:
+- `npm run lint` passa a ser `biome check --error-on-warnings` e as regras
+  relevantes viram `error` (`noExplicitAny`, `noConsoleLog`, `useImportType`,
+  `useExhaustiveDependencies`, `useAwait`, `noUnusedImports`, `noUnusedVariables`,
+  `noUnusedFunctionParameters`, `noUndeclaredVariables`, `noNonNullAssertion`,
+  `noParameterAssign`, `noUselessElse`). `useNamingConvention` fica `off`: o
+  snake_case vem do contrato da API.
+- `files.include` vira `["**"]` (o glob da raiz não funciona no 1.9.4) e o schema
+  gerado segue ignorado.
+- Cenários de falha de autenticação e fluxos assíncronos passam a ser specs com
+  `page.route` (mock de rede) em `apps/web/e2e/`: rodam sem API/DB e é isso que o CI
+  executa (`just e2e-mock`). Spec que exige backend real **pula** quando ele não
+  está disponível.
+- `playwright.config.ts` passa a ler `E2E_BASE_URL` e a subir o Vite sozinho quando
+  o alvo é a porta do Vite; `just e2e-full` aponta para `:8000` e sempre derruba o
+  compose (mesmo em falha).
+
+**Consequences**:
+- O job `e2e` do CI roda só os specs mockados (sem Postgres, sem Docker).
+- O lint do front passou a pegar arquivos que escapavam; corrigir isso exigiu
+  `import type { FormEvent }` em `Security.tsx` (o `React.FormEvent` era o namespace
+  UMD, sem import) e a reformatação dos 3 configs da raiz.
+- `noDefaultExport`, `useBlockStatements` e `useSortedClasses` ficaram de fora:
+  são churn de estilo, não rigor.
+
+---
+
 ## Future ADs (open questions)
 
 - _(none open — all shipped infra is documented above; product-level decisions like

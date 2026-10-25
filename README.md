@@ -309,6 +309,13 @@ O fluxo:
 
 Sempre que você **adicionar/alterar** um endpoint ou Pydantic model, rode `just web-types`. O `pre-commit` recusa o commit se `schema.d.ts` estiver desatualizado (`just check-schema` pra checar manualmente).
 
+Duas regras para o contrato não se degradir:
+
+- **Toda resposta de rota declara um model Pydantic explícito.** `dict[str, Any]` como `response_model` vira `Record<string, never>` no TypeScript — o front fica sem contrato nenhum. Use `model_validate` (entrada) e `model_dump(exclude_none=True)` (saída); `response_model_exclude_unset=True` quando o shape não pode ganhar campos nulos.
+- **`just check-schema` também é gate semântico**: além do diff de bytes, ele falha se alguma resposta de rota virar `Record<string, never>`/`unknown`. Rodar `just web-types` sem modelar a resposta não passa no CI.
+
+No front, os tipos vêm de `components["schemas"][...]` (reexportados em `src/api/types.ts`) — não redeclare shape de resposta à mão.
+
 ---
 
 ## CI
@@ -316,11 +323,13 @@ Sempre que você **adicionar/alterar** um endpoint ou Pydantic model, rode `just
 `.github/workflows/ci.yml`:
 - **backend**: ruff + pyright + pytest
 - **frontend**: tsc + lint (Biome) + build
-- **compose**: valida que `docker-compose.yml` continua válido
 - **sast**: semgrep com as regras locais de `semgrep.yml`
 - **dependency-audit**: pip-audit (via `uvx`) nas deps de produção do backend
+- **e2e**: Playwright nos cenários mockados (`page.route`), sem API/DB
+- **schema-sync**: regenera `schema.d.ts` e falha se estiver desatualizado
+- **compose**: valida que `docker-compose.yml` continua válido
 
-Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, schema e compose).
+Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, E2E mock, schema e compose).
 
 ---
 
@@ -328,7 +337,7 @@ Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, 
 
 - **Lint/typecheck**:
   - Backend: `ruff` (linter + formatter) + `pyright` (type checker). `just lint`, `just typecheck`.
-  - Frontend: `biome` (linter + formatter + import sort, único tool). `just web-lint`, `just web-lint-fix`.
+  - Frontend: `biome` (linter + formatter + import sort, único tool). `just web-lint`, `just web-lint-fix`. Roda com `--error-on-warnings`: warning bloqueia igual a erro, e as regras relevantes (`noExplicitAny`, `noConsoleLog`, `useImportType`, `noUnusedImports`, `noUnusedVariables`, `noUndeclaredVariables`, `noNonNullAssertion`...) estão em `error`.
   - **SAST**: `just bandit` (backend) + `just semgrep` (regras do projeto em `semgrep.yml`; requer `pipx install semgrep`).
   - Tudo roda em `just ci` (mesmo do GitHub Actions).
 - **Editor (VSCode)**: `.vscode/` tem settings compartilhadas (Biome como formatter default, Ruff no Python, Pyright, Tailwind, etc.), launch configs (API, worker, pytest) e tasks (`just init`, `just dev`, `just ci`, etc.). Abre o workspace e o VSCode oferece instalar as extensões recomendadas.
@@ -336,8 +345,8 @@ Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, 
 - **Dependências Python**: `uv` + `apps/api/uv.lock` (fonte de verdade); pins exatos em `apps/api/pyproject.toml`. `apps/api/requirements.txt` não existe mais. `just api-install` roda `uv sync`; `just api-audit` audita as deps de produção (pip-audit via `uvx`).
 - **Segredos**: NUNCA comitar `.env`. Em prod, monte via secret manager do orquestrador.
 - **Logs**: `structlog` JSON em prod, console em dev (stderr pra não poluir stdout).
-- **Tests**: `just test` roda a suite de 37 testes. Tudo que não precisa de DB.
-- **E2E**: `just e2e` (assume stack up) ou `just e2e-full` (sobe stack, roda, derruba).
+- **Tests**: `just test` roda a suite de 91 testes. Tudo que não precisa de DB.
+- **E2E**: `just e2e-mock` roda só os cenários mockados (`page.route`, sem API/DB — é o que o CI roda); `just e2e` roda a suíte inteira pulando o que precisa de backend; `just e2e-full` sobe o stack e roda contra a SPA servida pela API em `:8000`.
 
 ---
 
