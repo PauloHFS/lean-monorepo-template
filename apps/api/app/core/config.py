@@ -9,7 +9,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field, PostgresDsn, computed_field
+from pydantic import AliasChoices, Field, PostgresDsn, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -66,6 +66,21 @@ class Settings(BaseSettings):
     )
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 1.0
+
+    @field_validator("password_min_length")
+    @classmethod
+    def _validate_password_min_length(cls, value: int) -> int:
+        """Fail-fast: RegisterIn usa max_length=72 e bcrypt trunca em 72 BYTES.
+
+        Um mínimo acima do teto geraria um schema impossível e quebraria o
+        import do app; falhar aqui dá uma mensagem acionável no boot.
+        """
+        if not 1 <= value <= 72:
+            raise ValueError(
+                "PASSWORD_MIN_LENGTH must be between 1 and 72: the password "
+                "schema caps at 72 and bcrypt truncates at 72 BYTES."
+            )
+        return value
 
     # ---------- DSNs computadas ----------
     @computed_field  # type: ignore[prop-decorator]

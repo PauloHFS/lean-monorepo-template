@@ -28,7 +28,8 @@ class RegisterIn(BaseModel):
     email: EmailStr
     # min_length vem de settings (não hardcode) para não divergir de hash_password;
     # max_length=72 em CARACTERES porque bcrypt trunca em 72 BYTES — aceitar mais
-    # geraria o hash de uma senha que só existe truncada.
+    # geraria o hash de uma senha que só existe truncada. Settings valida
+    # password_min_length <= 72 no boot (fail-fast), então o Field é construível.
     password: str = Field(min_length=settings.password_min_length, max_length=72)
     full_name: str | None = Field(default=None, max_length=200)
 
