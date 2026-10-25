@@ -169,6 +169,21 @@ jobs:
       - name: Build image
         run: docker build -t lean-monorepo:ci .
 
+      # Mede o tamanho real da imagem e falha acima do teto, para travar regressão de layers.
+      - name: Image size
+        env:
+          MAX_IMAGE_MB: "700"
+        run: |
+          set -euo pipefail
+          bytes=$(docker image inspect lean-monorepo:ci --format '{{.Size}}')
+          mb=$(awk -v b="$bytes" 'BEGIN { printf "%.1f", b / 1000000 }')
+          echo "Imagem lean-monorepo:ci: ${mb} MB (teto: ${MAX_IMAGE_MB} MB)"
+          echo "| imagem | ${mb} MB |" >> "$GITHUB_STEP_SUMMARY"
+          awk -v mb="$mb" -v max="$MAX_IMAGE_MB" 'BEGIN { exit (mb > max) ? 1 : 0 }' || {
+            echo "::error::Imagem ${mb} MB excede o teto de ${MAX_IMAGE_MB} MB"
+            exit 1
+          }
+
       - name: Trivy (vulns na imagem)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
