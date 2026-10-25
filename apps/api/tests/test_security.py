@@ -1,4 +1,5 @@
 """Tests unitários de funções puras. Não precisam de DB."""
+
 import pytest
 
 from app.core import security

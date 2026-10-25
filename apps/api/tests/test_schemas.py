@@ -1,4 +1,5 @@
 """Tests de schemas Pydantic — round-trip de serialização."""
+
 import pytest
 from pydantic import ValidationError
 

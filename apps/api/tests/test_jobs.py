@@ -1,4 +1,5 @@
 """Tests das tasks de jobs (Procrastinate)."""
+
 from __future__ import annotations
 
 import procrastinate

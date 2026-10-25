@@ -1,4 +1,5 @@
 """Base declarativa compartilhada por todos os modelos."""
+
 from __future__ import annotations
 
 from datetime import datetime

@@ -35,7 +35,7 @@ jobs:
         run: uv sync --locked
 
       - name: Lint (ruff)
-        run: uv run ruff check .
+        run: uv run ruff check . && uv run ruff format --check .
 
       - name: Typecheck (pyright)
         run: uv run pyright app tests

@@ -1,4 +1,5 @@
 """Tests do rate limit (sem DB: SQL e factory)."""
+
 import inspect
 
 from app.core.ratelimit import HIT_SQL, rate_limit

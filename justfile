@@ -65,9 +65,9 @@ dev:
 test:
     cd apps/api && uv run pytest -q
 
-# Lint do backend
+# Lint do backend (ruff check + formatação)
 lint:
-    cd apps/api && uv run ruff check .
+    cd apps/api && uv run ruff check . && uv run ruff format --check .
 
 # Typecheck do backend (pyright)
 typecheck:

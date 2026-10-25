@@ -11,6 +11,7 @@ Notas:
   entre `app.py` e os módulos de task). Quem for deferir importa a task
   diretamente, o que também registra o decorador.
 """
+
 from __future__ import annotations
 
 import os

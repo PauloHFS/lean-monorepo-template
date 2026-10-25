@@ -3,6 +3,7 @@
 Centraliza os modelos de entrada/saída usados em mais de um endpoint —
 gera um OpenAPI limpo e tipos TS coerentes no front.
 """
+
 from __future__ import annotations
 
 from typing import Literal

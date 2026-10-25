@@ -3,6 +3,7 @@
 `get_db()` é injetado nas dependências do FastAPI e cuida do ciclo de vida:
 yield session → commit se sem erro → rollback se exceção → close sempre.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator

@@ -1,4 +1,5 @@
 """Pytest fixtures compartilhadas."""
+
 import os
 
 # Aponta para um .env mínimo válido durante os testes unitários

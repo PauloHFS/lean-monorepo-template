@@ -1,4 +1,5 @@
 """Health check — faz ping no banco para confirmar a stack toda."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter

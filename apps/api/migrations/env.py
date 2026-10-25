@@ -4,6 +4,7 @@ Lê o DSN do app.core.config e roda migrations usando SQLAlchemy 2.x async.
 Importante: este arquivo precisa enxergar o `Base` declarado em app.db.base,
 então ajustamos `sys.path` e importamos explicitamente os modelos.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -20,7 +21,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.config import settings  # noqa: E402
-from app.db.base import Base          # noqa: E402
+from app.db.base import Base  # noqa: E402
 
 # Garante que os modelos sejam registrados no metadata antes do autogenerate
 import app.db.models  # noqa: F401, E402
