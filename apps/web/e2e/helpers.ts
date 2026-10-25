@@ -1,0 +1,48 @@
+import type { APIRequestContext, Page, Route } from '@playwright/test'
+
+/** Usuário fake para os specs que mockam a sessão. */
+export const mockUser = {
+  id: '00000000-0000-0000-0000-000000000001',
+  email: 'e2e-mock@example.com',
+  full_name: 'E2E Mock',
+  is_active: true,
+  is_superuser: false,
+}
+
+/** true se a API real responde /api/v1/healthz em ~2s. Nunca lança. */
+export async function backendAvailable(request: APIRequestContext): Promise<boolean> {
+  try {
+    const res = await request.get('/api/v1/healthz', { timeout: 2_000 })
+    return res.ok()
+  } catch {
+    return false
+  }
+}
+
+/** Fulfill com JSON, sem repetir headers em cada spec. */
+export async function mockJson(route: Route, status: number, body: unknown): Promise<void> {
+  await route.fulfill({
+    status,
+    contentType: 'application/json',
+    body: JSON.stringify(body),
+  })
+}
+
+/** Sessão ausente: /auth/me devolve 401 e a UI cai no /login. */
+export function mockUnauthenticated(page: Page): Promise<void> {
+  return page.route('**/api/v1/auth/me', (route) =>
+    mockJson(route, 401, { detail: 'not authenticated' }),
+  )
+}
+
+/** Sessão autenticada: /auth/me devolve o usuário fake (libera o Dashboard). */
+export function mockAuthenticated(page: Page): Promise<void> {
+  return page.route('**/api/v1/auth/me', (route) => mockJson(route, 200, mockUser))
+}
+
+/** Healthz mockado para o card "Saúde do sistema" do Dashboard. */
+export function mockHealth(page: Page): Promise<void> {
+  return page.route('**/api/v1/healthz', (route) =>
+    mockJson(route, 200, { status: 'ok', db: true }),
+  )
+}

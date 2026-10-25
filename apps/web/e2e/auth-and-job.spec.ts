@@ -1,10 +1,16 @@
 import { expect, test } from '@playwright/test'
 
+import { backendAvailable } from './helpers'
+
 /**
  * Jornada crítica: registrar, logar, enfileirar e-mail, ver o job_id aparecer.
  * Exercita o caminho feliz end-to-end: UI -> Vite proxy -> API -> DB.
+ * Sem backend real (API/Postgres), o teste skipa.
  */
 test('registrar → login → enfileirar job aparece no Dashboard', async ({ page, request }) => {
+  const available = await backendAvailable(request)
+  test.skip(!available, 'backend real indisponível (API/Postgres fora do ar)')
+
   const email = `e2e-${Date.now()}@example.com`
   const password = 'supersecret123'
 

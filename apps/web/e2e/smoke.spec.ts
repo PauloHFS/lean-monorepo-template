@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test'
 
+import { backendAvailable } from './helpers'
+
 /**
- * Smoke: a UI carrega, links básicos funcionam, o /api/v1/healthz responde.
- * Cobre "o servidor subiu?" — primeira linha de defesa de regressão.
+ * Smoke: a UI carrega e links básicos funcionam.
+ * O healthz só roda com backend real no ar; sem stack, skipa em vez de falhar.
  */
-test('app carrega e healthz responde', async ({ page, request }) => {
+test('app carrega e o formulário de login aparece', async ({ page }) => {
   // 1. UI: home redireciona pra /dashboard, que manda pra /login (não autenticado)
   await page.goto('/')
   await expect(page).toHaveURL(/\/login$/)
@@ -13,8 +15,13 @@ test('app carrega e healthz responde', async ({ page, request }) => {
   await expect(page.getByLabel('E-mail')).toBeVisible()
   await expect(page.getByLabel('Senha')).toBeVisible()
   await expect(page.getByRole('button', { name: /entrar/i })).toBeVisible()
+})
 
-  // 3. /api/v1/healthz retorna { status: "ok", db: true } (ou degraded)
+test('healthz responde', async ({ request }) => {
+  const available = await backendAvailable(request)
+  test.skip(!available, 'backend real indisponível (API/Postgres fora do ar)')
+
+  // /api/v1/healthz retorna { status: "ok", db: true } (ou degraded)
   const res = await request.get('/api/v1/healthz')
   expect(res.status()).toBe(200)
   const body = await res.json()
@@ -22,8 +29,10 @@ test('app carrega e healthz responde', async ({ page, request }) => {
   expect(body.db).toBeDefined()
 })
 
-test('404 serve a SPA (rotas desconhecidas voltam ao login) ', async ({ page }) => {
+test('404 renderiza a página NotFound', async ({ page }) => {
   await page.goto('/rota-que-nao-existe')
-  // SPA fallback manda index.html, que carrega React, que cai no <Navigate> pra /login
-  await expect(page).toHaveURL(/\/login$/)
+
+  // App.tsx: rota "*" renderiza <NotFound>, sem redirect.
+  await expect(page.getByRole('heading', { name: /página não encontrada/i })).toBeVisible()
+  await expect(page).toHaveURL(/\/rota-que-nao-existe$/)
 })
