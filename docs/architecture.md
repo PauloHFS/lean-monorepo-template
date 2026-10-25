@@ -798,21 +798,32 @@ mantida, mas o 19 já era o `latest` e nenhuma dependência do repo o bloqueava.
 - Bumps menores no mesmo passo: `react-hook-form` 7.91.0, `@hookform/resolvers`
   6.0.0 (o breaking é só no resolver de Effect; usamos `zodResolver`) e
   `@playwright/test` 1.64.1.
-- **Ficam de fora, de propósito**: `typescript` (5.9.3 — o 7.0.2 é o port nativo
+- **react-router 8.5.0**: a barreira era o baseline do v8 (React ≥19.2.7,
+  Node ≥22.22, Vite 7+, ESM-only), que só o React 19 deste mesmo lote
+  destravou. Os componentes usados (`BrowserRouter`, `Routes`, `Route`,
+  `Navigate`, `useNavigate`, `Link`) continuam exportados pela **raiz** do
+  pacote (`react-router/dom` é outro entry), então **nenhuma linha de código
+  mudou**. Os breaking do v8 (flags `future.v8_*` removidas, `meta.data`,
+  `react-router-dom` derrubado, contextos `UNSAFE_` reestruturados no 8.4) não
+  atingem este app.
+- **Fica de fora, de propósito**: `typescript` (5.9.3 — o 7.0.2 é o port nativo
   em Go sem compiler API e o 6.x muda defaults que exigem revisão do
-  `tsconfig`) e `react-router` (7.18.4 — o 8.5.0 saiu há dias e exige React
-  ≥19.2.7; a série 7 ainda tem peer React ≥18).
+  `tsconfig`).
 
 **Consequences**:
 - O `npm audit` completo ficou em **0 vulnerabilidades** (as 3 moderate do
   Tailwind 3 sumiram) e o gate de produção segue em 0.
+- O `react-router` foi para o **8.5.0** no mesmo lote: ESM-only, Node ≥22.22 e
+  Vite 7+ já eram atendidos, o `react-router-dom` não é usado desde o v7 e
+  nenhum outro breaking do v8 toca este app — **zero mudança de código**, só
+  `package.json` e lockfile.
 - Paridade visual exige dois ajustes: no v4 `shadow-sm` é o antigo `shadow` (o
   antigo `shadow-sm` virou `shadow-xs`) e `outline-none` agora remove o outline
   de verdade (o antigo virou `outline-hidden`). Ambos foram aplicados nas
   `@utility`.
 - O CSS grew (11,67 → 16,20 kB) porque o v4 emite o tema inteiro como custom
-  properties; o JS cresceu com o React 19 (331,14 → 413,36 kB; gzip 106,64 →
-  130,40 kB).
+  properties; o JS cresceu com o React 19 (331,14 → 411,92 kB; gzip 106,64 →
+  129,94 kB).
 - O `package.json` ganhou um `overrides` mínimo
   (`{"@hookform/resolvers": {"effect": "4.0.0"}}`): sem ele o npm 11 auto-resolve
   a cadeia opcional `@typeschema/*`/`@effect/schema`, que exige Effect 3.x, e a

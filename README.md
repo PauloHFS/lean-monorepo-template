@@ -4,7 +4,7 @@ Template enxuto de monoprojeto com:
 
 - **Backend** Python 3.12 + FastAPI 0.162 + SQLAlchemy 2.0 async + Alembic 1.20
 - **Worker** [Procrastinate](https://procrastinate.readthedocs.io/) 3.10.0 (Postgres-only, mesma imagem da API)
-- **Frontend** React 19 + TypeScript + Vite 8 + Tailwind 4 + React Router 7
+- **Frontend** React 19 + TypeScript + Vite 8 + Tailwind 4 + React Router 8
 - **Tipos ponta a ponta** via `openapi-typescript` (regenerados com `just web-types`)
 - **2FA** opcional: TOTP (Google Authenticator) + passkey (WebAuthn/Touch ID)
 - **Rate limit** em `/auth/login` e `/auth/register` (Postgres, sem Redis)
