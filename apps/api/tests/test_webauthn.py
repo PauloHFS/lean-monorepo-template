@@ -1,4 +1,5 @@
 """Tests do WebAuthn (helpers puros: rp_id extraction, validação de inputs)."""
+
 from app.core import webauthn as wa
 
 
@@ -20,6 +21,6 @@ def test_rp_id_from_origin_handles_no_scheme():
 
 def test_rp_factory_uses_settings():
     wa.settings.web_origin = "https://app.example.com"
-    rp = wa._rp()
+    rp = wa.relying_party()
     assert rp.id == "app.example.com"
     assert rp.name == "Lean Monorepo"

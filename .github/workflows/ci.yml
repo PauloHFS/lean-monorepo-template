@@ -38,7 +38,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Typecheck (pyright)
-        run: uv run pyright app
+        run: uv run pyright app tests
 
       - name: Security SAST (bandit)
         run: uv run bandit -r app --severity-level medium

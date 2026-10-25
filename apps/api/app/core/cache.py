@@ -6,6 +6,7 @@
 
 `value` é qualquer coisa serializável em JSON (dict, list, str, int, float, bool, None).
 """
+
 from __future__ import annotations
 
 import json
@@ -38,7 +39,7 @@ DELETE_SQL = "DELETE FROM kv_cache WHERE key = :key"
 async def get(key: str) -> Any | None:
     async with SessionLocal() as session:
         row = (
-            await session.execute(text(GET_SQL), {"key": key, "now": datetime.now(UTC)})
+            (await session.execute(text(GET_SQL), {"key": key, "now": datetime.now(UTC)}))
             .mappings()
             .first()
         )
@@ -52,9 +53,7 @@ async def get(key: str) -> Any | None:
 
 
 async def set(key: str, value: Any, ttl_s: int | None = None) -> None:
-    expires_at = (
-        (datetime.now(UTC) + timedelta(seconds=ttl_s)) if ttl_s is not None else None
-    )
+    expires_at = (datetime.now(UTC) + timedelta(seconds=ttl_s)) if ttl_s is not None else None
     async with SessionLocal() as session, session.begin():
         await session.execute(
             text(UPSERT_SQL),

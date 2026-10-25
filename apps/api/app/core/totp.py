@@ -8,6 +8,7 @@ Fluxo:
 O secret NUNCA é devolvido após confirm() — é criptografado em repouso.
 A criptografia usa `cryptography.fernet.Fernet` com chave derivada do SECRET_KEY.
 """
+
 from __future__ import annotations
 
 import base64
@@ -15,6 +16,7 @@ import hashlib
 import json
 import secrets
 import string
+from typing import Any
 
 import pyotp
 from cryptography.fernet import Fernet
@@ -88,7 +90,7 @@ async def store_pending(user_id: str, *, ip: str | None, ua: str | None) -> str:
     return token
 
 
-async def consume_pending(token: str) -> dict | None:
+async def consume_pending(token: str) -> dict[str, Any] | None:
     raw = await cache.get(f"2fa:pending:{token}")
     if raw is None:
         return None

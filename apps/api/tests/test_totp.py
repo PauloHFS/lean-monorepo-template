@@ -1,4 +1,5 @@
 """Tests do TOTP (sem DB: puro)."""
+
 import time
 
 import pyotp
@@ -46,7 +47,7 @@ def test_verify_totp_rejects_wrong_code():
 def test_verify_totp_rejects_old_code_outside_window():
     secret = totp_mod.generate_secret()
     # Gera código de 2 minutos atrás (fora da janela ±1 step)
-    old_code = pyotp.TOTP(secret).at(time.time() - 120)
+    old_code = pyotp.TOTP(secret).at(int(time.time()) - 120)
     assert totp_mod.verify_totp(secret, old_code, valid_window=0) is False
 
 

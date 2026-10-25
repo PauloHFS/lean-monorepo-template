@@ -7,6 +7,7 @@ Decisões:
   em `sessions.token_hash`. Cookie envia o token cru.
 - Cookies: HttpOnly, SameSite=Lax por padrão, Secure em prod.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -15,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import bcrypt
+from starlette.responses import Response
 
 from app.core.config import settings
 
@@ -31,9 +33,7 @@ def _to_bytes(plain: str) -> bytes:
 
 def hash_password(plain: str) -> str:
     if len(plain) < settings.password_min_length:
-        raise ValueError(
-            f"senha deve ter ao menos {settings.password_min_length} caracteres"
-        )
+        raise ValueError(f"senha deve ter ao menos {settings.password_min_length} caracteres")
     return bcrypt.hashpw(_to_bytes(plain), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)).decode("ascii")
 
 
@@ -76,9 +76,9 @@ def cookie_attrs() -> dict[str, Any]:
     }
 
 
-def set_session_cookie(response, token: str) -> None:
+def set_session_cookie(response: Response, token: str) -> None:
     response.set_cookie(value=token, **cookie_attrs())
 
 
-def clear_session_cookie(response) -> None:
+def clear_session_cookie(response: Response) -> None:
     response.delete_cookie(**cookie_attrs())

@@ -199,11 +199,20 @@ just up-obs
 
 # 2) Configure .env:
 #    OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+#    OTEL_TRACES_SAMPLER=parentbased_traceidratio
+#    OTEL_SAMPLE_RATIO=1.0
 #    SENTRY_DSN=https://...@sentry.io/...
 
 # 3) Restart api/worker
 just down && just up
 ```
+
+Amostragem: `OTEL_TRACES_SAMPLER` aceita `always_on`, `always_off`, `traceidratio`
+ou `parentbased_traceidratio` (default); o ratio vem de `OTEL_SAMPLE_RATIO`
+(alias `OTEL_TRACES_SAMPLER_ARG`), default `1.0`.
+
+Cada resposta traz `X-Trace-Id` quando há span; logs incluem `trace_id`/`span_id`
+e o worker continua o trace do job (request → `email.enqueue` → `email.send`).
 
 URLs:
 - Grafana: <http://localhost:3000> (admin/admin)

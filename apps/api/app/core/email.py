@@ -20,6 +20,7 @@ Configuração:
 
 Por que SMTP-only? Um único código, um único caminho de erro, todos os provedores.
 """
+
 from __future__ import annotations
 
 import os
@@ -56,25 +57,25 @@ class SmtpProvider:
         starttls: bool = False,
         log_only: bool = False,
     ) -> None:
-        self._host = host
-        self._port = port
-        self._from = from_email
-        self._username = username or None
-        self._password = password or None
-        self._use_ssl = use_ssl
-        self._starttls = starttls
-        self._log_only = log_only
+        self.host = host
+        self.port = port
+        self.sender = from_email
+        self.username = username or None
+        self.password = password or None
+        self.use_ssl = use_ssl
+        self.starttls = starttls
+        self.log_only = log_only
         self._log = get_logger("email")
 
     async def send(self, msg: EmailMessage) -> None:
         recipients = msg.to if isinstance(msg.to, list) else [msg.to]
 
-        if self._log_only:
+        if self.log_only:
             self._log.info(
                 "email (log-only)",
                 to=recipients,
                 subject=msg.subject,
-                host=self._host,
+                host=self.host,
                 text_len=len(msg.text or ""),
                 html_len=len(msg.html or ""),
             )
@@ -82,7 +83,7 @@ class SmtpProvider:
 
         # Constrói mensagem MIME padrão do Python (multipart/alternative se text+html).
         py_msg = PyEmailMessage()
-        py_msg["From"] = msg.from_email or self._from
+        py_msg["From"] = msg.from_email or self.sender
         py_msg["To"] = ", ".join(recipients)
         py_msg["Subject"] = msg.subject
         if msg.text:
@@ -91,21 +92,21 @@ class SmtpProvider:
             py_msg.add_alternative(msg.html, subtype="html")
 
         async with aiosmtplib.SMTP(
-            hostname=self._host,
-            port=self._port,
-            use_tls=self._use_ssl,
+            hostname=self.host,
+            port=self.port,
+            use_tls=self.use_ssl,
         ) as client:
-            if self._starttls and not self._use_ssl:
+            if self.starttls and not self.use_ssl:
                 await client.starttls()
-            if self._username and self._password:
-                await client.login(self._username, self._password)
+            if self.username and self.password:
+                await client.login(self.username, self.password)
             await client.send_message(py_msg)
 
         self._log.info(
             "email enviado",
             to=recipients,
             subject=msg.subject,
-            host=self._host,
+            host=self.host,
         )
 
 
@@ -132,6 +133,4 @@ async def send_email(
     html: str | None = None,
 ) -> None:
     """Atalho: pega provider + chama send."""
-    await get_provider().send(
-        EmailMessage(to=to, subject=subject, text=text, html=html)
-    )
+    await get_provider().send(EmailMessage(to=to, subject=subject, text=text, html=html))

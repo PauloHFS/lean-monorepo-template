@@ -1,7 +1,8 @@
 """Tests do cache (sem DB: SQL e a função de geração de password)."""
+
 import string
 
-from app.cli import _gen_password
+from app.cli import gen_password
 from app.core.cache import DELETE_SQL, GET_SQL, UPSERT_SQL
 
 
@@ -24,12 +25,12 @@ def test_delete_sql_is_simple():
 
 
 def test_gen_password_length_and_alphabet():
-    p = _gen_password(length=24)
+    p = gen_password(length=24)
     assert len(p) == 24
     assert all(c in string.ascii_letters + string.digits for c in p)
 
 
 def test_gen_password_is_random():
-    a = _gen_password(32)
-    b = _gen_password(32)
+    a = gen_password(32)
+    b = gen_password(32)
     assert a != b

@@ -1,9 +1,12 @@
 """2FA endpoints: TOTP + passkey + recovery codes."""
+
 from __future__ import annotations
+
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import CursorResult, text
 
 from app.api.deps import DB, CurrentUser
 from app.core import totp as totp_mod
@@ -100,7 +103,9 @@ async def totp_confirm(payload: TotpConfirmIn, user: CurrentUser, session: DB) -
 # Verificação após login parcial
 # ---------------------------------------------------------------------------
 @router.post("/verify", response_model=None)
-async def twofa_verify(payload: TwoFactorVerifyIn, request: Request, response: Response) -> dict:
+async def twofa_verify(
+    payload: TwoFactorVerifyIn, request: Request, response: Response
+) -> dict[str, Any]:
     """Consome o pending token + valida TOTP/recovery. Emite cookie de sessão."""
     pending = await totp_mod.consume_pending(payload.pending_token)
     if pending is None:
@@ -111,12 +116,14 @@ async def twofa_verify(payload: TwoFactorVerifyIn, request: Request, response: R
     async with SessionLocal() as session:
         async with session.begin():
             row = (
-                await session.execute(
-                    text(
-                        "SELECT id, email, totp_secret_enc, totp_enabled, is_active "
-                        "FROM users WHERE id = :id"
-                    ),
-                    {"id": user_id},
+                (
+                    await session.execute(
+                        text(
+                            "SELECT id, email, totp_secret_enc, totp_enabled, is_active "
+                            "FROM users WHERE id = :id"
+                        ),
+                        {"id": user_id},
+                    )
                 )
                 .mappings()
                 .first()
@@ -132,15 +139,18 @@ async def twofa_verify(payload: TwoFactorVerifyIn, request: Request, response: R
             user_ok = True
         else:
             # Senão tenta recovery code
-            r = await session.execute(
-                text(
-                    """
-                    UPDATE totp_recovery_codes
-                       SET used_at = now()
-                     WHERE user_id = :uid AND code_hash = :h AND used_at IS NULL
-                    """
+            r = cast(
+                CursorResult[Any],
+                await session.execute(
+                    text(
+                        """
+                        UPDATE totp_recovery_codes
+                           SET used_at = now()
+                         WHERE user_id = :uid AND code_hash = :h AND used_at IS NULL
+                        """
+                    ),
+                    {"uid": row["id"], "h": totp_mod.hash_recovery_code(payload.code)},
                 ),
-                {"uid": row["id"], "h": totp_mod.hash_recovery_code(payload.code)},
             )
             await session.commit()
             user_ok = r.rowcount > 0
@@ -174,7 +184,7 @@ async def twofa_verify(payload: TwoFactorVerifyIn, request: Request, response: R
 # Passkey (WebAuthn)
 # ---------------------------------------------------------------------------
 class PasskeyOptionsOut(BaseModel):
-    options: dict  # JSON que vai direto para navigator.credentials
+    options: dict[str, Any]  # JSON que vai direto para navigator.credentials
     challenge: str  # b64 — armazenar no cache pra completar
 
 
@@ -196,22 +206,28 @@ class PasskeyLoginIn(BaseModel):
 async def passkey_register_options(user: CurrentUser, session: DB) -> PasskeyOptionsOut:
     """Gera options para `navigator.credentials.create()`."""
     existing = (
-        await session.execute(
-            text("SELECT credential_id FROM user_passkeys WHERE user_id = :uid"),
-            {"uid": user.id},
+        (
+            await session.execute(
+                text("SELECT credential_id FROM user_passkeys WHERE user_id = :uid"),
+                {"uid": user.id},
+            )
         )
         .mappings()
         .all()
     )
     options, challenge_b64 = wa.registration_options(
-        user_id=str(user.id), user_email=user.email, existing_keys=[r["credential_id"] for r in existing]
+        user_id=str(user.id),
+        user_email=user.email,
+        existing_keys=[r["credential_id"] for r in existing],
     )
     await totp_mod.store_pending(f"passkey:register:{user.id}", ip="", ua="")  # placeholder
     return PasskeyOptionsOut(options=options, challenge=challenge_b64)
 
 
 @router.post("/passkey/register/verify", status_code=204, response_model=None)
-async def passkey_register_verify(payload: PasskeyRegisterIn, user: CurrentUser, session: DB) -> None:
+async def passkey_register_verify(
+    payload: PasskeyRegisterIn, user: CurrentUser, session: DB
+) -> None:
     """Verifica attestation e persiste a credencial."""
     info = wa.complete_registration(
         challenge_b64=payload.challenge,
@@ -243,11 +259,11 @@ async def passkey_login_options(payload: PendingIn, session: DB) -> PasskeyOptio
     if pending is None:
         raise HTTPException(401, "pending invalid")
     keys = (
-        await session.execute(
-            text(
-                "SELECT credential_id FROM user_passkeys WHERE user_id = :uid"
-            ),
-            {"uid": pending["user_id"]},
+        (
+            await session.execute(
+                text("SELECT credential_id FROM user_passkeys WHERE user_id = :uid"),
+                {"uid": pending["user_id"]},
+            )
         )
         .mappings()
         .all()
@@ -265,7 +281,9 @@ async def passkey_login_options(payload: PendingIn, session: DB) -> PasskeyOptio
 
 
 @router.post("/passkey/login/verify", response_model=None)
-async def passkey_login_verify(payload: PasskeyLoginIn, request: Request, response: Response) -> dict:
+async def passkey_login_verify(
+    payload: PasskeyLoginIn, request: Request, response: Response
+) -> dict[str, Any]:
     """Verifica assertion e emite cookie."""
     # payload.challenge contém "challenge_b64:pending_token"
     challenge_b64, pending_token = payload.challenge.split(":", 1)
@@ -274,16 +292,17 @@ async def passkey_login_verify(payload: PasskeyLoginIn, request: Request, respon
         raise HTTPException(401, "pending invalid")
     user_id = pending["user_id"]
 
-
     async with SessionLocal() as session:
         async with session.begin():
             pk = (
-                await session.execute(
-                    text(
-                        "SELECT credential_id, public_key, sign_count "
-                        "FROM user_passkeys WHERE user_id = :uid LIMIT 1"
-                    ),
-                    {"uid": user_id},
+                (
+                    await session.execute(
+                        text(
+                            "SELECT credential_id, public_key, sign_count "
+                            "FROM user_passkeys WHERE user_id = :uid LIMIT 1"
+                        ),
+                        {"uid": user_id},
+                    )
                 )
                 .mappings()
                 .first()
@@ -339,9 +358,11 @@ class PendingIn(BaseModel):
 async def user_two_factor_methods(user_id: str, session: DB) -> list[str]:
     methods: list[str] = []
     row = (
-        await session.execute(
-            text("SELECT totp_enabled FROM users WHERE id = :uid"),
-            {"uid": user_id},
+        (
+            await session.execute(
+                text("SELECT totp_enabled FROM users WHERE id = :uid"),
+                {"uid": user_id},
+            )
         )
         .mappings()
         .first()

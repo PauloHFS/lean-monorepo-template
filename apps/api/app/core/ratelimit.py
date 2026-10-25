@@ -14,10 +14,12 @@ Algoritmo:
 - O SELECT é separado para descobrir se passou do limite após o increment.
 - Aceitável para volumes moderados. Se virar gargalo, mover para advisory lock.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from typing import cast
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy import text
@@ -43,24 +45,40 @@ HIT_SQL = """
 """
 
 
+# A contagem e a janela reais vivem no SQL (`HIT_SQL`). `build_key` e
+# `is_blocked` são apenas a parte pura e testável dessa dependency.
+def build_key(ip: str, endpoint: str) -> str:
+    """Monta a chave do contador: `ip:endpoint`."""
+    return f"{ip}:{endpoint}"
+
+
+def is_blocked(count: int, limit: int) -> bool:
+    """As `limit` primeiras requisições passam; a partir da limit+1 bloqueia."""
+    return count > limit
+
+
 async def hit(key: str, limit: int, window_s: int) -> tuple[int, datetime]:
     """Registra uma tentativa e devolve (count_atual, window_start)."""
     now = datetime.now(UTC)
     window_start_min = now.timestamp() - window_s
     async with SessionLocal() as session, session.begin():
         row = (
-            await session.execute(
-                text(HIT_SQL),
-                {
-                    "key": key,
-                    "now": now,
-                    "window_start_min": datetime.fromtimestamp(window_start_min, tz=UTC),
-                },
+            (
+                await session.execute(
+                    text(HIT_SQL),
+                    {
+                        "key": key,
+                        "now": now,
+                        "window_start_min": datetime.fromtimestamp(window_start_min, tz=UTC),
+                    },
+                )
             )
             .mappings()
             .first()
         )
-    return int(row["count"]), row["window_start"]
+    if row is None:
+        raise RuntimeError("rate limit upsert não retornou linha")
+    return int(row["count"]), cast(datetime, row["window_start"])
 
 
 def rate_limit(
@@ -70,9 +88,9 @@ def rate_limit(
 
     async def _dep(request: Request) -> None:
         ip = request.client.host if request.client else "unknown"
-        key = f"{ip}:{endpoint}"
+        key = build_key(ip, endpoint)
         count, _ = await hit(key, limit=limit, window_s=window_s)
-        if count > limit:
+        if is_blocked(count, limit):
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="rate limit exceeded",

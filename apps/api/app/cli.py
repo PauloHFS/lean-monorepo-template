@@ -7,6 +7,7 @@ Uso:
     python -m app.cli enqueue-job email.send '{"to":"a@b.com"}'
     python -m app.cli db-status
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +15,8 @@ import json
 import secrets
 import string
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from sqlalchemy import text
 
@@ -39,7 +41,7 @@ def cmd_dump_openapi(_args: list[str]) -> int:
     return 0
 
 
-def _gen_password(length: int = 16) -> str:
+def gen_password(length: int = 16) -> str:
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
@@ -49,9 +51,11 @@ async def _seed() -> None:
     email = _DEFAULT_SEED_EMAIL
     async with SessionLocal() as session, session.begin():
         existing = (
-            await session.execute(
-                text("SELECT id FROM users WHERE email = :e"),
-                {"e": email},
+            (
+                await session.execute(
+                    text("SELECT id FROM users WHERE email = :e"),
+                    {"e": email},
+                )
             )
             .mappings()
             .first()
@@ -60,25 +64,29 @@ async def _seed() -> None:
             print(f"admin já existe (id={existing['id']}); nada a fazer.")
             return
 
-        password = _gen_password()
+        password = gen_password()
         row = (
-            await session.execute(
-                text(
-                    """
+            (
+                await session.execute(
+                    text(
+                        """
                         INSERT INTO users (email, password_hash, full_name, is_superuser)
                         VALUES (:e, :ph, :n, TRUE)
                         RETURNING id, email, created_at
                         """
-                ),
-                {
-                    "e": email,
-                    "ph": hash_password(password),
-                    "n": _DEFAULT_SEED_NAME,
-                },
+                    ),
+                    {
+                        "e": email,
+                        "ph": hash_password(password),
+                        "n": _DEFAULT_SEED_NAME,
+                    },
+                )
             )
             .mappings()
             .first()
         )
+    if row is None:
+        raise RuntimeError("INSERT de admin não retornou linha")
     print(f"admin criado: id={row['id']} email={row['email']}")
     print(f"senha (guarde, não será mostrada de novo): {password}")
 
@@ -88,19 +96,23 @@ async def _create_user(email: str, password: str, full_name: str | None) -> None
     async with SessionLocal() as session:
         async with session.begin():
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         INSERT INTO users (email, password_hash, full_name)
                         VALUES (:e, :ph, :n)
                         RETURNING id, email, full_name
                         """
-                    ),
-                    {"e": email, "ph": ph, "n": full_name},
+                        ),
+                        {"e": email, "ph": ph, "n": full_name},
+                    )
                 )
                 .mappings()
                 .first()
             )
+        if row is None:
+            raise RuntimeError("INSERT de usuário não retornou linha")
         print(f"created: id={row['id']} email={row['email']}")
 
 
@@ -124,26 +136,29 @@ async def _db_status() -> None:
     async with SessionLocal() as session:
         db_ok = (await session.execute(text("SELECT 1"))).scalar_one() == 1
         row = (
-            await session.execute(
-                text(
-                    "SELECT status::text AS status, COUNT(*) AS n "
-                    "FROM procrastinate_jobs GROUP BY status"
+            (
+                await session.execute(
+                    text(
+                        "SELECT status::text AS status, COUNT(*) AS n "
+                        "FROM procrastinate_jobs GROUP BY status"
+                    )
                 )
             )
             .mappings()
             .all()
         )
-        jobs = {r["status"]: r["n"] for r in row}
+        jobs: dict[str, Any] = {r["status"]: r["n"] for r in row}
         sessions = (await session.execute(text("SELECT COUNT(*) FROM sessions"))).scalar_one()
 
     print(f"db:           {'ok' if db_ok else 'DOWN'}")
     print(f"jobs by status: {jobs or '{}'}")
     print(f"active sessions: {sessions}")
 
+
 # -----------------------------------------------------------------------------
 # Dispatcher
 # -----------------------------------------------------------------------------
-AsyncCmd = Callable[[list[str]], Awaitable[int]]
+AsyncCmd = Callable[[list[str]], Coroutine[Any, Any, int]]
 SyncCmd = Callable[[list[str]], int]
 
 
@@ -155,14 +170,14 @@ def _need(rank: str, n: int, args: list[str], usage_msg: str) -> int:
 
 
 async def cmd_create_user(args: list[str]) -> int:
-    if (rc := _need("create-user", 2, args, "<email> <password> [name]")):
+    if rc := _need("create-user", 2, args, "<email> <password> [name]"):
         return rc
     await _create_user(args[0], args[1], args[2] if len(args) > 2 else None)
     return 0
 
 
 async def cmd_enqueue_job(args: list[str]) -> int:
-    if (rc := _need("enqueue-job", 1, args, "<kind> [payload-json]")):
+    if rc := _need("enqueue-job", 1, args, "<kind> [payload-json]"):
         return rc
     await _enqueue_job(args[0], args[1] if len(args) > 1 else "{}")
     return 0

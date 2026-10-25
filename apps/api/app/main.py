@@ -6,6 +6,7 @@
 
 A ordem é importante: rotas registradas têm prioridade sobre o fallback catch-all.
 """
+
 from __future__ import annotations
 
 import os
@@ -20,8 +21,12 @@ from fastapi.staticfiles import StaticFiles
 from app.api.v1 import api_router
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.core.middleware import SecurityHeadersMiddleware
-from app.core.observability import setup_observability, setup_sentry
+from app.core.middleware import SecurityHeadersMiddleware, TraceIdMiddleware
+from app.core.observability import (
+    setup_observability,
+    setup_sentry,
+    shutdown_tracing,
+)
 from app.db.session import engine
 from app.jobs.app import app as procrastinate_app
 
@@ -29,9 +34,7 @@ log = get_logger("api.main")
 
 # Anchor relativo a este arquivo: apps/api/app/main.py -> apps/api/app -> apps/api
 # -> apps -> <repo root> -> + apps/web/dist
-_DEFAULT_SPA_DIST = (
-    Path(__file__).resolve().parent.parent.parent.parent / "apps" / "web" / "dist"
-)
+_DEFAULT_SPA_DIST = Path(__file__).resolve().parent.parent.parent.parent / "apps" / "web" / "dist"
 SPA_DIST = Path(os.environ.get("SPA_DIST_PATH", str(_DEFAULT_SPA_DIST))).resolve()
 
 
@@ -47,11 +50,13 @@ async def lifespan(app: FastAPI):
 
     # Abre o pool do Procrastinate (usado por defer_async nos endpoints/CLI).
     # O import de `app.jobs.app` também registra as tasks do app.
-    async with procrastinate_app.open_async():
-        yield
-
-    await engine.dispose()
-    log.info("API encerrada")
+    try:
+        async with procrastinate_app.open_async():
+            yield
+    finally:
+        shutdown_tracing()
+        await engine.dispose()
+        log.info("API encerrada")
 
 
 app = FastAPI(
@@ -65,6 +70,8 @@ app = FastAPI(
 
 # Observability — vendor-agnostic no app. Setar OTEL_EXPORTER_OTLP_ENDPOINT
 # (e opcionalmente SENTRY_DSN) habilita tracing + error tracking.
+# TraceIdMiddleware entra ANTES do instrumentor para ficar dentro do span.
+app.add_middleware(TraceIdMiddleware)
 setup_sentry()
 setup_observability(app)
 

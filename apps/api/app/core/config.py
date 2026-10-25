@@ -3,12 +3,13 @@
 Lê de .env / variáveis de ambiente. Importa em qualquer lugar como:
     from app.core.config import settings
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import PostgresDsn, computed_field
+from pydantic import AliasChoices, Field, PostgresDsn, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -53,6 +54,18 @@ class Settings(BaseSettings):
     worker_poll_interval_ms: int = 500
     worker_batch_size: int = 5
     worker_visibility_timeout_s: int = 300
+
+    # --- Observability (AD-011) ---
+    # Tudo opcional: sem endpoint/DSN o tracing é no-op.
+    otel_exporter_otlp_endpoint: str | None = None
+    otel_traces_sampler: str | None = None
+    # Aceita também o nome padrão do OTel para o argumento do sampler.
+    otel_sample_ratio: float = Field(
+        default=1.0,
+        validation_alias=AliasChoices("OTEL_SAMPLE_RATIO", "OTEL_TRACES_SAMPLER_ARG"),
+    )
+    sentry_dsn: str | None = None
+    sentry_traces_sample_rate: float = 1.0
 
     # ---------- DSNs computadas ----------
     @computed_field  # type: ignore[prop-decorator]

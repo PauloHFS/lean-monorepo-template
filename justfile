@@ -71,7 +71,7 @@ lint:
 
 # Typecheck do backend (pyright)
 typecheck:
-    cd apps/api && uv run pyright app
+    cd apps/api && uv run pyright app tests
 
 # SAST de seguranca (bandit)
 bandit:

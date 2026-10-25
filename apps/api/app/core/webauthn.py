@@ -8,20 +8,27 @@ Fluxo:
 
 Configuração: relying party = origin do front (settings.web_origin).
 """
+
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from importlib import import_module
+from typing import Any, cast
 
-from webauthn import (
-    create_webauthn_credentials,
-    get_webauthn_credentials,
-    verify_create_webauthn_credentials,
-    verify_get_webauthn_credentials,
-)
 from webauthn.metadata import FIDOMetadata
 from webauthn.types import RelyingParty, User, UserVerification
 
 from app.core.config import settings
+
+# py-webauthn 0.0.6 não publica stubs/py.typed; normalizamos a fronteira com
+# tipos explícitos para não propagar Unknown pelo app.
+_OptionsCall = Callable[..., tuple[dict[str, Any], str]]
+_VerifyCall = Callable[..., Any]
+_wa = cast(Any, import_module("webauthn"))
+create_webauthn_credentials = cast(_OptionsCall, _wa.create_webauthn_credentials)
+get_webauthn_credentials = cast(_OptionsCall, _wa.get_webauthn_credentials)
+verify_create_webauthn_credentials = cast(_VerifyCall, _wa.verify_create_webauthn_credentials)
+verify_get_webauthn_credentials = cast(_VerifyCall, _wa.verify_get_webauthn_credentials)
 
 _RP_NAME = "Lean Monorepo"
 _USER_VERIFICATION = UserVerification.Preferred
@@ -37,19 +44,21 @@ def rp_id_from_origin() -> str:
     return origin.split(":")[0]
 
 
-def _rp() -> RelyingParty:
+def relying_party() -> RelyingParty:
     return RelyingParty(id=rp_id_from_origin(), name=_RP_NAME, icon=None)
 
 
 def _user(user_id: str, email: str) -> User:
-    return User(id=user_id.encode("utf-8"), name=email, display_name=email)
+    return User(id=user_id.encode("utf-8"), name=email, display_name=email, icon=None)
 
 
 # ---- Registration ---------------------------------------------------------
-def registration_options(user_id: str, user_email: str, existing_keys: list[bytes]) -> tuple[dict, str]:
+def registration_options(
+    user_id: str, user_email: str, existing_keys: list[bytes]
+) -> tuple[dict[str, Any], str]:
     """Gera opções para `navigator.credentials.create()`. Devolve (options_dict, challenge_b64)."""
     options, challenge_b64 = create_webauthn_credentials(
-        rp=_rp(),
+        rp=relying_party(),
         user=_user(user_id, user_email),
         existing_keys=existing_keys,
         user_verification=_USER_VERIFICATION,
@@ -65,13 +74,15 @@ def complete_registration(
 ) -> dict[str, Any]:
     """Verifica attestation do cliente. Devolve dados para persistir."""
     result = verify_create_webauthn_credentials(
-        rp=_rp(),
+        rp=relying_party(),
         challenge_b64=challenge_b64,
         client_data_b64=client_data_b64,
         attestation_b64=attestation_b64,
-        fido_metadata=FIDOMetadata(),
+        fido_metadata=FIDOMetadata(entries=[], aaguid_map={}, cki_map={}),
         user_verification_required=False,
     )
+    # py-webauthn 0.0.6 não declara `credential_id` em CreateResult, mas o app
+    # assume esse campo (mesma suposição do código original).
     return {
         "credential_id": result.credential_id,
         "public_key": result.public_key,
@@ -80,10 +91,10 @@ def complete_registration(
 
 
 # ---- Authentication --------------------------------------------------------
-def authentication_options(existing_keys: list[bytes]) -> tuple[dict, str]:
+def authentication_options(existing_keys: list[bytes]) -> tuple[dict[str, Any], str]:
     """Gera opções para `navigator.credentials.get()`. Devolve (options_dict, challenge_b64)."""
     options, challenge_b64 = get_webauthn_credentials(
-        rp=_rp(),
+        rp=relying_party(),
         existing_keys=existing_keys,
         user_verification=_USER_VERIFICATION,
     )
@@ -102,7 +113,7 @@ def complete_authentication(
 ) -> int:
     """Verifica assertion. Devolve o novo sign_count (caller atualiza DB)."""
     result = verify_get_webauthn_credentials(
-        rp=_rp(),
+        rp=relying_party(),
         challenge_b64=challenge_b64,
         client_data_b64=client_data_b64,
         authenticator_b64=authenticator_b64,

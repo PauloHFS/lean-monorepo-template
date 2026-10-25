@@ -61,6 +61,8 @@ dev = [
     # --- Testes ---
     "pytest==9.0.3",
     "pytest-asyncio==1.4.0",
+    # --- Testes de propriedades (MPL-2.0) ---
+    "hypothesis==6.170.9",
     # --- Lint / type / SAST ---
     "ruff==0.8.4",
     "pyright==1.1.414",
@@ -108,5 +110,5 @@ known-first-party = ["app"]
 
 # ---- Pyright ----
 # Config em pyrightconfig.json (typed, fora do pyproject).
-# Padrão "standard" — erros rígidos no app; tests/** e módulos com tipagem
-# dinâmica (SQLAlchemy async, Result.mappings, etc.) ficam em "ignore".
+# Modo "strict" em app e tests; sem lista de exclusões. A única relaxação é
+# reportMissingTypeStubs=warning (libs de terceiro sem stubs).

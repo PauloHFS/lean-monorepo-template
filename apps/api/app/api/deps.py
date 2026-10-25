@@ -1,4 +1,5 @@
 """Dependências injetadas nos endpoints do FastAPI."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -23,9 +24,11 @@ async def get_current_user(request: Request, session: DB) -> User:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not authenticated")
 
     sess_row = (
-        await session.execute(
-            text("SELECT id, user_id, expires_at FROM sessions WHERE token_hash = :th"),
-            {"th": hash_session_token(token)},
+        (
+            await session.execute(
+                text("SELECT id, user_id, expires_at FROM sessions WHERE token_hash = :th"),
+                {"th": hash_session_token(token)},
+            )
         )
         .mappings()
         .first()

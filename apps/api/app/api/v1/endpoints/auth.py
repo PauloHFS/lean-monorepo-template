@@ -1,4 +1,5 @@
 """Auth: registro, login, logout, /me."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -38,6 +39,7 @@ class LoginIn(BaseModel):
 
 class LoginOut(BaseModel):
     """Resposta de login: ou UserOut (login OK) ou TwoFactorRequired (2FA pendente)."""
+
     requires_2fa: bool = False
     pending_token: str | None = None
     methods: list[str] = []
@@ -54,15 +56,17 @@ class LoginOut(BaseModel):
 async def register(payload: RegisterIn, session: DB) -> UserOut:
     ph = hash_password(payload.password)
     row = (
-        await session.execute(
-            text(
-                """
+        (
+            await session.execute(
+                text(
+                    """
                 INSERT INTO users (email, password_hash, full_name)
                 VALUES (:email, :ph, :name)
                 RETURNING id, email, full_name, is_active, is_superuser
                 """
-            ),
-            {"email": payload.email, "ph": ph, "name": payload.full_name},
+                ),
+                {"email": payload.email, "ph": ph, "name": payload.full_name},
+            )
         )
         .mappings()
         .first()
@@ -82,12 +86,14 @@ async def login(
     payload: LoginIn, request: Request, response: Response, session: DB
 ) -> dict[str, Any]:
     row = (
-        await session.execute(
-            text(
-                "SELECT id, email, password_hash, full_name, is_superuser, is_active, totp_enabled "
-                "FROM users WHERE email = :e"
-            ),
-            {"e": payload.email},
+        (
+            await session.execute(
+                text(
+                    "SELECT id, email, password_hash, full_name, is_superuser, is_active, totp_enabled "
+                    "FROM users WHERE email = :e"
+                ),
+                {"e": payload.email},
+            )
         )
         .mappings()
         .first()

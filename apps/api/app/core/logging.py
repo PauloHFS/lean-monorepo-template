@@ -11,8 +11,26 @@ import sys
 from typing import Any
 
 import structlog
+from opentelemetry import trace
 
 from app.core.config import settings
+
+
+def add_trace_context(
+    _logger: Any, _method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
+    """Processor structlog: anexa `trace_id`/`span_id` do span corrente.
+
+    Sem span válido, grava `None` (nunca a string de zeros).
+    """
+    span_context = trace.get_current_span().get_span_context()
+    if span_context.is_valid:
+        event_dict["trace_id"] = format(span_context.trace_id, "032x")
+        event_dict["span_id"] = format(span_context.span_id, "016x")
+    else:
+        event_dict["trace_id"] = None
+        event_dict["span_id"] = None
+    return event_dict
 
 
 def _configure_logging() -> None:
@@ -25,6 +43,7 @@ def _configure_logging() -> None:
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
+        add_trace_context,
         timestamper,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
