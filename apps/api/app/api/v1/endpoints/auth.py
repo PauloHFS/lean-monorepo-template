@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import text
@@ -38,7 +36,7 @@ class LoginIn(BaseModel):
 
 
 class LoginOut(BaseModel):
-    """Resposta de login: ou UserOut (login OK) ou TwoFactorRequired (2FA pendente)."""
+    """Resposta de login: ou UserOut (login OK) ou challenge de 2FA pendente."""
 
     requires_2fa: bool = False
     pending_token: str | None = None
@@ -77,14 +75,13 @@ async def register(payload: RegisterIn, session: DB) -> UserOut:
     return UserOut(**dict(row))
 
 
-# nosemgrep: fastapi-response-model-required — divida legado: login responde UserOut ou challenge de 2FA
 @router.post(
     "/login",
+    response_model=LoginOut,
+    response_model_exclude_unset=True,
     dependencies=[Depends(rate_limit("auth.login", limit=5, window_s=60))],
 )
-async def login(
-    payload: LoginIn, request: Request, response: Response, session: DB
-) -> dict[str, Any]:
+async def login(payload: LoginIn, request: Request, response: Response, session: DB) -> LoginOut:
     row = (
         (
             await session.execute(
@@ -122,12 +119,12 @@ async def login(
             ip=request.client.host if request.client else None,
             ua=request.headers.get("user-agent"),
         )
-        return {
-            "requires_2fa": True,
-            "pending_token": token,
-            "methods": methods,
-            "user": None,
-        }
+        return LoginOut(
+            requires_2fa=True,
+            pending_token=token,
+            methods=methods,
+            user=None,
+        )
 
     # Sem 2FA → emite cookie direto
     token = generate_session_token()
@@ -149,16 +146,16 @@ async def login(
     await session.commit()
 
     set_session_cookie(response, token)
-    return {
-        "requires_2fa": False,
-        "user": {
-            "id": str(row["id"]),
-            "email": row["email"],
-            "full_name": row["full_name"],
-            "is_active": row["is_active"],
-            "is_superuser": row["is_superuser"],
-        },
-    }
+    return LoginOut(
+        requires_2fa=False,
+        user=UserOut(
+            id=str(row["id"]),
+            email=row["email"],
+            full_name=row["full_name"],
+            is_active=row["is_active"],
+            is_superuser=row["is_superuser"],
+        ),
+    )
 
 
 @router.post("/logout", status_code=204, response_model=None)

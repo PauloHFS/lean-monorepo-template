@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
@@ -40,15 +40,13 @@ class TotpConfirmOut(BaseModel):
     recovery_codes: list[str]  # mostrado UMA vez
 
 
-class TwoFactorRequiredOut(BaseModel):
-    requires_2fa: bool
-    pending_token: str
-    methods: list[str]  # ex.: ["totp", "passkey"]
-
-
 class TwoFactorVerifyIn(BaseModel):
     pending_token: str
     code: str  # TOTP code OU recovery code
+
+
+class OkOut(BaseModel):
+    ok: bool
 
 
 @router.post("/totp/setup", response_model=TotpSetupOut)
@@ -103,10 +101,8 @@ async def totp_confirm(payload: TotpConfirmIn, user: CurrentUser, session: DB) -
 # ---------------------------------------------------------------------------
 # Verificação após login parcial
 # ---------------------------------------------------------------------------
-@router.post("/verify", response_model=None)
-async def twofa_verify(
-    payload: TwoFactorVerifyIn, request: Request, response: Response
-) -> dict[str, Any]:
+@router.post("/verify", response_model=OkOut)
+async def twofa_verify(payload: TwoFactorVerifyIn, request: Request, response: Response) -> OkOut:
     """Consome o pending token + valida TOTP/recovery. Emite cookie de sessão."""
     pending = await totp_mod.consume_pending(payload.pending_token)
     if pending is None:
@@ -178,25 +174,107 @@ async def twofa_verify(
         await session.commit()
 
     set_session_cookie(response, token)
-    return {"ok": True}
+    return OkOut(ok=True)
 
 
 # ---------------------------------------------------------------------------
 # Passkey (WebAuthn)
 # ---------------------------------------------------------------------------
-class PasskeyOptionsOut(BaseModel):
-    options: dict[str, Any]  # JSON que vai direto para navigator.credentials
+class PasskeyCredentialDescriptorOut(BaseModel):
+    id: str  # base64url
+    type: Literal["public-key"]
+
+
+class PasskeyRpOut(BaseModel):
+    name: str
+    id: str
+
+
+class PasskeyUserOut(BaseModel):
+    id: str  # base64url
+    name: str
+    displayName: str
+
+
+class PasskeyPubKeyCredParamOut(BaseModel):
+    type: Literal["public-key"]
+    alg: int
+
+
+class PasskeyAuthenticatorSelectionOut(BaseModel):
+    residentKey: str
+    requireResidentKey: bool
+    userVerification: str
+
+
+class PasskeyRegistrationOptionsOut(BaseModel):
+    """JSON de `navigator.credentials.create()` (shape real da lib webauthn)."""
+
+    rp: PasskeyRpOut
+    user: PasskeyUserOut
+    challenge: str
+    pubKeyCredParams: list[PasskeyPubKeyCredParamOut]
+    timeout: int
+    excludeCredentials: list[PasskeyCredentialDescriptorOut]
+    authenticatorSelection: PasskeyAuthenticatorSelectionOut
+    attestation: str
+
+
+class PasskeyAuthenticationOptionsOut(BaseModel):
+    """JSON de `navigator.credentials.get()` (shape real da lib webauthn)."""
+
+    challenge: str
+    timeout: int
+    rpId: str
+    allowCredentials: list[PasskeyCredentialDescriptorOut]
+    userVerification: str
+
+
+class PasskeyRegisterOptionsOut(BaseModel):
+    options: PasskeyRegistrationOptionsOut
     challenge: str  # b64 — armazenar no cache pra completar
+
+
+class PasskeyLoginOptionsOut(BaseModel):
+    options: PasskeyAuthenticationOptionsOut
+    challenge: str  # b64 — armazenar no cache pra completar
+
+
+class PasskeyCredentialBase(BaseModel):
+    id: str
+    rawId: str
+    type: Literal["public-key"]
+
+
+class PasskeyRegistrationResponse(BaseModel):
+    clientDataJSON: str
+    attestationObject: str
+    transports: list[str] | None = None
+
+
+class PasskeyRegistrationCredential(PasskeyCredentialBase):
+    response: PasskeyRegistrationResponse
+
+
+class PasskeyAuthenticationResponse(BaseModel):
+    clientDataJSON: str
+    authenticatorData: str
+    signature: str
+    userHandle: str | None = None
+
+
+class PasskeyAuthenticationCredential(PasskeyCredentialBase):
+    response: PasskeyAuthenticationResponse
 
 
 class PasskeyRegisterIn(BaseModel):
     challenge: str  # "challenge_b64:pending_token" retornado nas options
-    credential: dict[str, Any]
+    credential: PasskeyRegistrationCredential
 
 
 class PasskeyLoginIn(BaseModel):
     challenge: str  # "challenge_b64:pending_token" retornado nas options
-    credential: dict[str, Any]
+    credential: PasskeyAuthenticationCredential
 
 
 def _split_challenge(value: str) -> tuple[str, str]:
@@ -210,12 +288,9 @@ def _split_challenge(value: str) -> tuple[str, str]:
     return challenge_b64, pending_token
 
 
-def _credential_id(credential: dict[str, Any]) -> bytes:
-    """Extrai o credential_id (bytes) do dict enviado pelo browser."""
-    raw_id = credential.get("id")
-    if not isinstance(raw_id, str):
-        raise HTTPException(400, "invalid credential")
-    return base64url_to_bytes(raw_id)
+def _credential_id(credential: PasskeyCredentialBase) -> bytes:
+    """Extrai o credential_id (bytes) da credencial enviada pelo browser."""
+    return base64url_to_bytes(credential.id)
 
 
 async def _consume_challenge(pending_token: str, challenge_b64: str) -> dict[str, Any]:
@@ -229,10 +304,10 @@ async def _consume_challenge(pending_token: str, challenge_b64: str) -> dict[str
     return pending
 
 
-@router.post("/passkey/register/options", response_model=PasskeyOptionsOut)
+@router.post("/passkey/register/options", response_model=PasskeyRegisterOptionsOut)
 async def passkey_register_options(
     user: CurrentUser, session: DB, request: Request
-) -> PasskeyOptionsOut:
+) -> PasskeyRegisterOptionsOut:
     """Gera options para `navigator.credentials.create()`."""
     existing = (
         (
@@ -255,7 +330,10 @@ async def passkey_register_options(
         ua=request.headers.get("user-agent"),
         challenge=challenge_b64,
     )
-    return PasskeyOptionsOut(options=options, challenge=f"{challenge_b64}:{token}")
+    return PasskeyRegisterOptionsOut(
+        options=PasskeyRegistrationOptionsOut.model_validate(options),
+        challenge=f"{challenge_b64}:{token}",
+    )
 
 
 @router.post("/passkey/register/verify", status_code=204, response_model=None)
@@ -269,7 +347,7 @@ async def passkey_register_verify(
         raise HTTPException(400, "challenge mismatch")
     info = wa.complete_registration(
         challenge_b64=challenge_b64,
-        credential=payload.credential,
+        credential=payload.credential.model_dump(exclude_none=True),
     )
     await session.execute(
         text(
@@ -289,8 +367,8 @@ async def passkey_register_verify(
     await session.commit()
 
 
-@router.post("/passkey/login/options", response_model=PasskeyOptionsOut)
-async def passkey_login_options(payload: PendingIn, session: DB) -> PasskeyOptionsOut:
+@router.post("/passkey/login/options", response_model=PasskeyLoginOptionsOut)
+async def passkey_login_options(payload: PendingIn, session: DB) -> PasskeyLoginOptionsOut:
     """Gera options para `navigator.credentials.get()`."""
     pending = await totp_mod.consume_pending(payload.pending_token)
     if pending is None:
@@ -315,13 +393,16 @@ async def passkey_login_options(payload: PendingIn, session: DB) -> PasskeyOptio
         ua=pending.get("ua"),
         challenge=challenge_b64,
     )
-    return PasskeyOptionsOut(options=options, challenge=f"{challenge_b64}:{new_token}")
+    return PasskeyLoginOptionsOut(
+        options=PasskeyAuthenticationOptionsOut.model_validate(options),
+        challenge=f"{challenge_b64}:{new_token}",
+    )
 
 
-@router.post("/passkey/login/verify", response_model=None)
+@router.post("/passkey/login/verify", response_model=OkOut)
 async def passkey_login_verify(
     payload: PasskeyLoginIn, request: Request, response: Response
-) -> dict[str, Any]:
+) -> OkOut:
     """Verifica assertion e emite cookie."""
     challenge_b64, pending_token = _split_challenge(payload.challenge)
     pending = await _consume_challenge(pending_token, challenge_b64)
@@ -348,7 +429,7 @@ async def passkey_login_verify(
 
         new_sign_count = wa.complete_authentication(
             challenge_b64=challenge_b64,
-            credential=payload.credential,
+            credential=payload.credential.model_dump(exclude_none=True),
             public_key=bytes(pk["public_key"]),
             sign_count=pk["sign_count"],
         )
@@ -380,7 +461,7 @@ async def passkey_login_verify(
         await session.commit()
 
     set_session_cookie(response, token)
-    return {"ok": True}
+    return OkOut(ok=True)
 
 
 class PendingIn(BaseModel):

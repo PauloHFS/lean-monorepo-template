@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException
@@ -13,6 +12,7 @@ from sqlalchemy import CursorResult, text
 from app.api.deps import DB, CurrentUser
 from app.api.schemas import UserOut
 from app.core.observability import inject_trace_context
+from app.jobs.tasks.email import send_email
 
 router = APIRouter()
 
@@ -24,7 +24,7 @@ class EnqueueEmailIn(BaseModel):
 
 
 class EnqueueEmailOut(BaseModel):
-    job_id: str
+    job_id: int  # id do job no Procrastinate
     status: str
 
 
@@ -71,22 +71,12 @@ async def delete_user(user_id: str, user: CurrentUser, session: DB) -> None:
 
 
 @router.post("/enqueue-email", response_model=EnqueueEmailOut, status_code=202)
-async def enqueue_email(payload: EnqueueEmailIn, session: DB) -> EnqueueEmailOut:
-    """Enfileira um `email.send` na tabela `background_jobs`."""
+async def enqueue_email(payload: EnqueueEmailIn) -> EnqueueEmailOut:
+    """Enfileira um `email.send` na fila do Procrastinate (mesma task do worker/CLI)."""
     tracer = trace.get_tracer("lean.api")
     with tracer.start_as_current_span("email.enqueue"):
-        job_payload = inject_trace_context(payload.model_dump(mode="json"))
-        job_id = (
-            await session.execute(
-                text(
-                    """
-                    INSERT INTO background_jobs (kind, payload)
-                    VALUES ('email.send', :payload::jsonb)
-                    RETURNING id
-                    """
-                ),
-                {"payload": json.dumps(job_payload)},
-            )
-        ).scalar_one()
-        await session.commit()
-    return EnqueueEmailOut(job_id=str(job_id), status="queued")
+        job_payload = inject_trace_context(
+            {"to": payload.to, "subject": payload.subject, "text": payload.body}
+        )
+        job_id = await send_email.defer_async(**job_payload)
+    return EnqueueEmailOut(job_id=job_id, status="queued")

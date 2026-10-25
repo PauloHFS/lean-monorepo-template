@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import procrastinate
+import pytest
 from procrastinate import testing
+from pydantic import ValidationError
 
+from app.api.v1.endpoints.users import EnqueueEmailOut
 from app.jobs.app import app
 from app.jobs.tasks.email import send_email
 
@@ -32,3 +35,10 @@ async def test_send_email_defer_enqueues_job() -> None:
     assert job["task_name"] == "email.send"
     assert job["queue_name"] == "email"
     assert job["args"] == {"to": "x@y.com", "subject": "hi"}
+
+
+def test_enqueue_email_out_job_id_is_int() -> None:
+    out = EnqueueEmailOut(job_id=42, status="queued")
+    assert out.job_id == 42
+    with pytest.raises(ValidationError):
+        EnqueueEmailOut(job_id="not-an-int", status="queued")  # type: ignore[arg-type]

@@ -294,7 +294,7 @@ export interface paths {
         put?: never;
         /**
          * Enqueue Email
-         * @description Enfileira um `email.send` na tabela `background_jobs`.
+         * @description Enfileira um `email.send` na fila do Procrastinate (mesma task do worker/CLI).
          */
         post: operations["enqueue_email_api_v1_users_enqueue_email_post"];
         delete?: never;
@@ -322,7 +322,7 @@ export interface components {
         /** EnqueueEmailOut */
         EnqueueEmailOut: {
             /** Job Id */
-            job_id: string;
+            job_id: number;
             /** Status */
             status: string;
         };
@@ -351,26 +351,179 @@ export interface components {
             /** Password */
             password: string;
         };
+        /**
+         * LoginOut
+         * @description Resposta de login: ou UserOut (login OK) ou challenge de 2FA pendente.
+         */
+        LoginOut: {
+            /**
+             * Requires 2Fa
+             * @default false
+             */
+            requires_2fa: boolean;
+            /** Pending Token */
+            pending_token?: string | null;
+            /**
+             * Methods
+             * @default []
+             */
+            methods: string[];
+            user?: components["schemas"]["UserOut"] | null;
+        };
+        /** OkOut */
+        OkOut: {
+            /** Ok */
+            ok: boolean;
+        };
+        /** PasskeyAuthenticationCredential */
+        PasskeyAuthenticationCredential: {
+            /** Id */
+            id: string;
+            /** Rawid */
+            rawId: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "public-key";
+            response: components["schemas"]["PasskeyAuthenticationResponse"];
+        };
+        /**
+         * PasskeyAuthenticationOptionsOut
+         * @description JSON de `navigator.credentials.get()` (shape real da lib webauthn).
+         */
+        PasskeyAuthenticationOptionsOut: {
+            /** Challenge */
+            challenge: string;
+            /** Timeout */
+            timeout: number;
+            /** Rpid */
+            rpId: string;
+            /** Allowcredentials */
+            allowCredentials: components["schemas"]["PasskeyCredentialDescriptorOut"][];
+            /** Userverification */
+            userVerification: string;
+        };
+        /** PasskeyAuthenticationResponse */
+        PasskeyAuthenticationResponse: {
+            /** Clientdatajson */
+            clientDataJSON: string;
+            /** Authenticatordata */
+            authenticatorData: string;
+            /** Signature */
+            signature: string;
+            /** Userhandle */
+            userHandle?: string | null;
+        };
+        /** PasskeyAuthenticatorSelectionOut */
+        PasskeyAuthenticatorSelectionOut: {
+            /** Residentkey */
+            residentKey: string;
+            /** Requireresidentkey */
+            requireResidentKey: boolean;
+            /** Userverification */
+            userVerification: string;
+        };
+        /** PasskeyCredentialDescriptorOut */
+        PasskeyCredentialDescriptorOut: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "public-key";
+        };
         /** PasskeyLoginIn */
         PasskeyLoginIn: {
             /** Challenge */
             challenge: string;
-            /** Credential */
-            credential: Record<string, never>;
+            credential: components["schemas"]["PasskeyAuthenticationCredential"];
         };
-        /** PasskeyOptionsOut */
-        PasskeyOptionsOut: {
-            /** Options */
-            options: Record<string, never>;
+        /** PasskeyLoginOptionsOut */
+        PasskeyLoginOptionsOut: {
+            options: components["schemas"]["PasskeyAuthenticationOptionsOut"];
             /** Challenge */
             challenge: string;
+        };
+        /** PasskeyPubKeyCredParamOut */
+        PasskeyPubKeyCredParamOut: {
+            /**
+             * Type
+             * @constant
+             */
+            type: "public-key";
+            /** Alg */
+            alg: number;
         };
         /** PasskeyRegisterIn */
         PasskeyRegisterIn: {
             /** Challenge */
             challenge: string;
-            /** Credential */
-            credential: Record<string, never>;
+            credential: components["schemas"]["PasskeyRegistrationCredential"];
+        };
+        /** PasskeyRegisterOptionsOut */
+        PasskeyRegisterOptionsOut: {
+            options: components["schemas"]["PasskeyRegistrationOptionsOut"];
+            /** Challenge */
+            challenge: string;
+        };
+        /** PasskeyRegistrationCredential */
+        PasskeyRegistrationCredential: {
+            /** Id */
+            id: string;
+            /** Rawid */
+            rawId: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "public-key";
+            response: components["schemas"]["PasskeyRegistrationResponse"];
+        };
+        /**
+         * PasskeyRegistrationOptionsOut
+         * @description JSON de `navigator.credentials.create()` (shape real da lib webauthn).
+         */
+        PasskeyRegistrationOptionsOut: {
+            rp: components["schemas"]["PasskeyRpOut"];
+            user: components["schemas"]["PasskeyUserOut"];
+            /** Challenge */
+            challenge: string;
+            /** Pubkeycredparams */
+            pubKeyCredParams: components["schemas"]["PasskeyPubKeyCredParamOut"][];
+            /** Timeout */
+            timeout: number;
+            /** Excludecredentials */
+            excludeCredentials: components["schemas"]["PasskeyCredentialDescriptorOut"][];
+            authenticatorSelection: components["schemas"]["PasskeyAuthenticatorSelectionOut"];
+            /** Attestation */
+            attestation: string;
+        };
+        /** PasskeyRegistrationResponse */
+        PasskeyRegistrationResponse: {
+            /** Clientdatajson */
+            clientDataJSON: string;
+            /** Attestationobject */
+            attestationObject: string;
+            /** Transports */
+            transports?: string[] | null;
+        };
+        /** PasskeyRpOut */
+        PasskeyRpOut: {
+            /** Name */
+            name: string;
+            /** Id */
+            id: string;
+        };
+        /** PasskeyUserOut */
+        PasskeyUserOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Displayname */
+            displayName: string;
         };
         /** PendingIn */
         PendingIn: {
@@ -525,7 +678,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": Record<string, never>;
+                    "application/json": components["schemas"]["LoginOut"];
                 };
             };
             /** @description Validation Error */
@@ -649,7 +802,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["OkOut"];
                 };
             };
             /** @description Validation Error */
@@ -678,7 +831,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PasskeyOptionsOut"];
+                    "application/json": components["schemas"]["PasskeyRegisterOptionsOut"];
                 };
             };
         };
@@ -733,7 +886,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PasskeyOptionsOut"];
+                    "application/json": components["schemas"]["PasskeyLoginOptionsOut"];
                 };
             };
             /** @description Validation Error */
@@ -766,7 +919,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["OkOut"];
                 };
             };
             /** @description Validation Error */
