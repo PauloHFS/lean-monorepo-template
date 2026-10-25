@@ -10,7 +10,7 @@
 # =============================================================================
 
 # ---- Stage 1: front ---------------------------------------------------------
-FROM node:20-alpine AS build-web
+FROM node:24-alpine AS build-web
 WORKDIR /web
 # browsers do Playwright nao sao necessarios no build do Vite
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
