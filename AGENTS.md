@@ -104,6 +104,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - Preserve a autenticação vigente: sessão opaca revogável em cookie `HttpOnly`, hash de senha com `bcrypt` e 2FA opcional por TOTP e WebAuthn. JWT e Argon2 não fazem parte da arquitetura atual; não os introduza sem ADR.
 - Valide entrada na fronteira, use bind parameters no SQL e preserve as proteções contra XSS existentes no React e na API.
 - Nunca versione `.env`, credenciais, tokens ou chaves. Use `.env.example` apenas para nomes de variáveis sem segredos.
+- Configuração impossível é erro de config, e erro de config falha **alto e no boot**: o `Settings` valida o que a aplicação não consegue cumprir (ex.: `password_min_length` tem que estar em 1..72, senão o schema de senha é impossível). Nunca capar o valor em silêncio.
 
 ### Imagem, saúde e boot
 
@@ -112,6 +113,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - `worker` e `migrate` desligam o healthcheck da imagem (`healthcheck: disable: true`): não servem HTTP.
 - Papéis do entrypoint: `migrate` (one-shot, roda `alembic upgrade head`), `api`, `worker`. api/worker **não** rodam migration (evita corrida). A espera do Postgres usa `pg_isready` (fallback TCP) e **termina com `exit 1`** ao estourar.
 - `API_INTERNAL_PORT` é a porta interna do container; `API_PORT` é a porta publicada no host. uvicorn e healthcheck usam a interna.
+- O job `docker` do CI **mede o tamanho real da imagem** e falha acima do teto (700 MB): a estimativa local (~250–450 MB) é só estimativa, quem manda é o gate.
 
 ### Backup e restauração
 
@@ -158,7 +160,7 @@ Use a menor matriz que cubra a mudança e rode `just ci` antes de submeter alter
 | Schema Pydantic, rota ou contrato OpenAPI | `just web-types && just check-schema` (o `check-schema` falha se alguma resposta de rota ficar sem contrato tipado) |
 | Dependências Python ou npm | `just api-audit` e `just web-audit` |
 | Qualquer alteração de código coberta pelas regras do `semgrep.yml` | `just semgrep` |
-| Dockerfile, compose ou entrypoint | `just validate-compose` + `bash -n scripts/entrypoint.sh` (sem daemon: `docker compose config --quiet`; o build real só no CI) |
+| Dockerfile, compose ou entrypoint | `just validate-compose` + `bash -n scripts/entrypoint.sh` (sem daemon: `docker compose config --quiet`; o build real e o teto de tamanho da imagem são do job `docker` do CI) |
 | Backup ou restauração | `bash -n scripts/backup.sh scripts/restore.sh scripts/test-restore.sh` + `just test-restore` (exige Postgres + client no PATH) |
 
 `just ci` inclui `just semgrep` (SAST), as auditorias de dependências e `just e2e-mock`; não inclui build do frontend, E2E contra a stack real, build Docker, Trivy nem o teste de restauração; rode esses checks quando a mudança os alcançar. O pre-commit não substitui `just ci`.

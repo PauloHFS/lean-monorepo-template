@@ -215,9 +215,12 @@ Cada resposta traz `X-Trace-Id` quando há span; logs incluem `trace_id`/`span_i
 e o worker continua o trace do job (request → `email.enqueue` → `email.send`).
 
 URLs:
-- Grafana: <http://localhost:3000> (admin/admin)
+- Grafana: <http://localhost:3000> (user `admin`; senha = `GRAFANA_ADMIN_PASSWORD`)
 - Tempo API: <http://localhost:3200>
 - Prometheus: <http://localhost:9090>
+
+Credenciais default do compose (Postgres `app`/`app`, Grafana `admin`/`admin`) são só para dev local.
+Defina `GRAFANA_ADMIN_PASSWORD` no `.env`: o Grafana 11.3.1 ignora a variável vazia e volta ao `admin`/`admin`.
 
 Sem Sentry self-hosted (pesado demais). Se precisar de error tracking, use Sentry SaaS via `SENTRY_DSN`.
 
@@ -341,10 +344,10 @@ No front, os tipos vêm de `components["schemas"][...]` (reexportados em `src/ap
 - **e2e**: Playwright nos cenários mockados (`page.route`), sem API/DB
 - **schema-sync**: regenera `schema.d.ts` e falha se estiver desatualizado
 - **compose**: valida que `docker-compose.yml` continua válido
-- **docker**: build da imagem + Trivy (CRITICAL/HIGH bloqueia)
+- **docker**: build da imagem + medição do tamanho real (teto de 700 MB) + Trivy (CRITICAL/HIGH bloqueia)
 - **restore-test**: backup → restore → verificação num Postgres efêmero
 
-Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, E2E mock, schema e compose). O build da imagem, o Trivy e a prova de restauração só rodam no CI (exigem daemon).
+Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, E2E mock, schema e compose). O build da imagem, a medição do tamanho, o Trivy e a prova de restauração só rodam no CI (exigem daemon).
 
 ---
 

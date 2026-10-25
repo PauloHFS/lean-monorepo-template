@@ -610,8 +610,13 @@ passaria.
 - `apps/api/tests/test_validation.py` (20 testes) fixa os limites exatos e
   documenta a armadilha do login; `tests/test_properties_validators.py` passou a
   exigir rejeição.
-- Se `password_min_length` for configurado acima de 72, `Field(min_length>72,
-  max_length=72)` fica inconsistente: o teto é do bcrypt, não um tunable.
+- `password_min_length` acima de 72 é **configuração impossível**, e por isso
+  falha no boot: `Settings` valida `1 <= password_min_length <= 72` e levanta
+  `ValidationError` citando `PASSWORD_MIN_LENGTH` e o teto de 72 bytes do
+  bcrypt. Sem essa validação, `Field(min_length>72, max_length=72)` só
+  apareceria como erro de schema na construção do modelo. O valor nunca é
+  capado em silêncio: política impossível de cumprir é erro de config, e erro de
+  config deve falhar alto.
 - O limite de 72 é contado em CARACTERES, enquanto o truncamento do bcrypt é em
   BYTES: senhas multibyte ainda podem truncar (comportamento pré-existente).
 
