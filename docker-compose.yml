@@ -11,6 +11,7 @@ services:
     image: postgis/postgis:16-3.4
     container_name: lm_postgres
     restart: unless-stopped
+    # Defaults (app/app) são só para dev local; sobrescreva em qualquer ambiente real.
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-app}
       POSTGRES_USER: ${POSTGRES_USER:-app}
@@ -30,7 +31,7 @@ services:
   # ---- Mailpit: SMTP server com web UI para dev/test ----------------------
   # Captura emails enviados pelo SmtpProvider. Ver em http://localhost:8025
   mailpit:
-    image: axllent/mailpit:latest
+    image: axllent/mailpit:v1.32.0
     container_name: lm_mailpit
     restart: unless-stopped
     environment:
@@ -162,7 +163,8 @@ services:
     profiles: ["observability"]
     restart: unless-stopped
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Grafana 11.3.1 ignora env vazio e cai no default "admin" do defaults.ini: defina a senha no .env.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
     ports:
       - "3000:3000"
     volumes:
