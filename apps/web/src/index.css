@@ -1,6 +1,12 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #f3f7ff;
+  --color-brand-500: #3b6bff;
+  --color-brand-600: #2a55e6;
+  --color-brand-700: #1f44c1;
+  --font-sans: "Inter", system-ui, sans-serif;
+}
 
 :root {
   font-synthesis: none;
@@ -15,20 +21,18 @@ body,
   height: 100%;
 }
 
-@layer components {
-  .btn {
-    @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-offset-2;
-  }
-  .btn-primary {
-    @apply btn bg-brand-600 text-white hover:bg-brand-700 focus:ring-brand-500 disabled:opacity-50;
-  }
-  .btn-ghost {
-    @apply btn bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 focus:ring-brand-500;
-  }
-  .input {
-    @apply w-full rounded-md border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:ring-brand-500;
-  }
-  .card {
-    @apply rounded-xl border border-slate-200 bg-white p-6 shadow-sm;
-  }
+@utility btn {
+  @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition focus:outline-hidden focus:ring-2 focus:ring-offset-2;
+}
+@utility btn-primary {
+  @apply btn bg-brand-600 text-white hover:bg-brand-700 focus:ring-brand-500 disabled:opacity-50;
+}
+@utility btn-ghost {
+  @apply btn bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 focus:ring-brand-500;
+}
+@utility input {
+  @apply w-full rounded-md border-slate-200 bg-white px-3 py-2 text-sm shadow-xs focus:border-brand-500 focus:ring-brand-500;
+}
+@utility card {
+  @apply rounded-xl border border-slate-200 bg-white p-6 shadow-xs;
 }
