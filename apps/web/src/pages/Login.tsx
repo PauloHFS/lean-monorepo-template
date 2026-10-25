@@ -6,8 +6,10 @@ import { z } from 'zod'
 
 import { ApiError } from '../api/client'
 import { AuthApi, TwoFactorApi } from '../api/endpoints'
+import type { PasskeyAuthenticationCredential } from '../api/types'
 import { useAuth } from '../lib/auth'
 import { bytesToBase64Url } from '../lib/base64'
+import { toAuthenticationOptions } from '../lib/webauthn'
 
 const credSchema = z.object({
   email: z.string().email('e-mail inválido'),
@@ -45,20 +47,17 @@ export function Login() {
     setSubmitError(null)
     try {
       const response = await AuthApi.login(values)
-      if ('requires_2fa' in response && response.requires_2fa) {
-        // type assertion: response vem como {requires_2fa: true, pending_token, methods}
-        // mas a union com UserOut só tem requires_2fa.
-        const r = response as unknown as {
-          pending_token: string
-          methods: string[]
-        }
-        setPending({ token: r.pending_token, methods: r.methods })
+      if (response.requires_2fa) {
+        setPending({ token: response.pending_token ?? '', methods: response.methods })
         setStep('verify')
         return
       }
       // Login sem 2FA — cookie setado. Atualiza contexto e vai.
-      const user = response as import('../api/types').UserOut
-      setUser(user)
+      if (!response.user) {
+        setSubmitError('sessão inválida — tente novamente')
+        return
+      }
+      setUser(response.user)
       navigate('/dashboard', { replace: true })
     } catch (err) {
       setSubmitError(humanizeError(err))
@@ -88,30 +87,33 @@ export function Login() {
         pending_token: pending.token,
       })
 
-      const credential = (await navigator.credentials.get({
-        publicKey: options as unknown as PublicKeyCredentialRequestOptions,
-      })) as PublicKeyCredential | null
+      const credential = await navigator.credentials.get({
+        publicKey: toAuthenticationOptions(options),
+      })
 
-      if (!credential) {
+      if (!(credential instanceof PublicKeyCredential)) {
         setSubmitError('autenticação cancelada')
         return
       }
 
-      const resp = credential.response as AuthenticatorAssertionResponse
-      await TwoFactorApi.passkeyLoginVerify({
-        challenge,
-        credential: {
-          id: credential.id,
-          rawId: bytesToBase64Url(credential.rawId),
-          type: 'public-key',
-          response: {
-            clientDataJSON: bytesToBase64Url(resp.clientDataJSON),
-            authenticatorData: bytesToBase64Url(resp.authenticatorData),
-            signature: bytesToBase64Url(resp.signature),
-            userHandle: resp.userHandle ? bytesToBase64Url(resp.userHandle) : undefined,
-          },
+      const resp = credential.response
+      if (!(resp instanceof AuthenticatorAssertionResponse)) {
+        setSubmitError('resposta inesperada do autenticador')
+        return
+      }
+
+      const credentialPayload: PasskeyAuthenticationCredential = {
+        id: credential.id,
+        rawId: bytesToBase64Url(credential.rawId),
+        type: 'public-key',
+        response: {
+          clientDataJSON: bytesToBase64Url(resp.clientDataJSON),
+          authenticatorData: bytesToBase64Url(resp.authenticatorData),
+          signature: bytesToBase64Url(resp.signature),
+          userHandle: resp.userHandle ? bytesToBase64Url(resp.userHandle) : undefined,
         },
-      })
+      }
+      await TwoFactorApi.passkeyLoginVerify({ challenge, credential: credentialPayload })
 
       const user = await AuthApi.me()
       setUser(user)
@@ -162,9 +164,6 @@ export function Login() {
               inputMode="numeric"
               autoComplete="one-time-code"
               {...codeForm.register('code')}
-              ref={(el) => {
-                el?.focus()
-              }}
               className="input mt-1"
             />
             {codeForm.formState.errors.code && (
@@ -225,9 +224,6 @@ export function Login() {
             type="email"
             autoComplete="email"
             {...credForm.register('email')}
-            ref={(el) => {
-              el?.focus()
-            }}
             className="input mt-1"
           />
           {credForm.formState.errors.email && (

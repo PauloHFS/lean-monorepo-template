@@ -1,9 +1,12 @@
 import QRCode from 'qrcode'
 import { useState } from 'react'
+import type { FormEvent } from 'react'
 
 import { ApiError } from '../api/client'
 import { TwoFactorApi } from '../api/endpoints'
+import type { PasskeyRegisterIn } from '../api/types'
 import { bytesToBase64Url } from '../lib/base64'
+import { toRegistrationOptions } from '../lib/webauthn'
 
 type Stage = 'idle' | 'scanning' | 'confirming' | 'enabled'
 
@@ -43,7 +46,7 @@ export function Security() {
     }
   }
 
-  async function confirmTotp(e: React.FormEvent) {
+  async function confirmTotp(e: FormEvent) {
     e.preventDefault()
     setError(null)
     setBusy(true)
@@ -69,17 +72,22 @@ export function Security() {
       const { options, challenge } = await TwoFactorApi.passkeyRegisterOptions()
       // navigator.credentials.create devolve attestation que mandamos de volta
       // para o backend verificar.
-      const credential = (await navigator.credentials.create({
-        publicKey: options as unknown as PublicKeyCredentialCreationOptions,
-      })) as PublicKeyCredential | null
+      const credential = await navigator.credentials.create({
+        publicKey: toRegistrationOptions(options),
+      })
 
-      if (!credential) {
+      if (!(credential instanceof PublicKeyCredential)) {
         setError('registro cancelado')
         return
       }
 
-      const resp = credential.response as AuthenticatorAttestationResponse
-      const payload = {
+      const resp = credential.response
+      if (!(resp instanceof AuthenticatorAttestationResponse)) {
+        setError('resposta inesperada do autenticador')
+        return
+      }
+
+      const payload: PasskeyRegisterIn = {
         challenge,
         credential: {
           id: credential.id,
@@ -88,7 +96,7 @@ export function Security() {
           response: {
             clientDataJSON: bytesToBase64Url(resp.clientDataJSON),
             attestationObject: bytesToBase64Url(resp.attestationObject),
-            transports: resp.getTransports?.() ?? undefined,
+            transports: resp.getTransports?.(),
           },
         },
       }
