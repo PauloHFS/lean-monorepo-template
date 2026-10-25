@@ -112,7 +112,7 @@ Pra rodar api+worker+web paralelos num comando só: `just dev`.
 >
 > O Python do backend é gerenciado por `uv` — instale com `brew install uv` ou `curl -LsSf https://astral.sh/uv/install.sh | sh`. As deps ficam em `apps/api/pyproject.toml` (pins exatos) e `apps/api/uv.lock` é a fonte de verdade das versões.
 >
-> O front usa **Node 24** (o Node 20 está EOL e o Vite 8 exige `^20.19 || >=22.12`).
+> O front usa **Node 24** (o Node 20 está EOL e o Vite 8 exige `^20.19 || >=22.12`). As versões das ferramentas de dev estão no `mise.toml` — `mise install` prepara Node, just e uv na versão certa.
 
 ---
 

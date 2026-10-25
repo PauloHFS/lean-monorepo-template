@@ -24,6 +24,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - Prefira a biblioteca padrão, uma dependência já instalada ou um helper local. Não crie abstração ou dependência especulativa.
 - O gerenciador de pacotes Python é o `uv`: dependências ficam em `apps/api/pyproject.toml` (pins exatos) e as versões resolvidas em `apps/api/uv.lock`. Não reintroduza `pip install`, `requirements.txt` nem venv manual.
 - Use `uv sync` para preparar `apps/api/.venv` e `uv run <comando>` para executar ferramentas e scripts. Em CI use `uv sync --locked`; rode `uv lock` e versione o `uv.lock` junto de qualquer mudança no `pyproject.toml`.
+- As versões das ferramentas de dev estão em `mise.toml` (Node 24, just, uv): `mise install` prepara o ambiente. O Python é do `uv` — não declare `python` no mise, e as tasks continuam no `justfile`.
 - Mantenha o lockfile `apps/web/package-lock.json` atualizado ao mexer em dependências npm.
 - Rode a auditoria após mudar dependências: `just api-audit` (pip-audit via `uvx`, dependências de produção do backend) e `just web-audit` (npm audit de produção).
 

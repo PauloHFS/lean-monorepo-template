@@ -1,0 +1,12 @@
+# Versões das ferramentas de dev — `mise install` prepara o ambiente.
+#
+# O Python NÃO entra aqui: quem manda no interpretador é o uv (AD-013), via
+# `.python-version` e `apps/api/uv.lock`. Duas ferramentas donas do mesmo
+# interpretador só brigam.
+#
+# As tasks continuam no `justfile`: o mise fixa versões, o just roda os
+# ~30 comandos do projeto.
+[tools]
+node = "24"
+just = "1"
+uv = "0.10"
