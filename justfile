@@ -180,6 +180,10 @@ backup-now:
 backup-ls:
     rclone ls $RCLONE_REMOTE_NAME:$RCLONE_BUCKET/
 
+# Prova de restauracao: backup local -> restore -> verificacao (exige Postgres + client no PATH)
+test-restore:
+    ./scripts/test-restore.sh
+
 # Remove caches e artefatos locais
 clean:
     find . -type d -name "__pycache__" -prune -exec rm -rf {} +

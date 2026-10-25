@@ -187,3 +187,39 @@ jobs:
 
       - name: Validate compose file
         run: docker compose config --quiet
+
+  restore-test:
+    name: backup -> restore -> verify (postgres 16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: app
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    steps:
+      - uses: actions/checkout@v4
+
+      # pg_dump/pg_restore/psql ficam no runner; o service container so roda o servidor.
+      - name: Instalar client do Postgres
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Backup -> restore -> verify
+        run: bash scripts/test-restore.sh
