@@ -4,7 +4,7 @@ Template enxuto de monoprojeto com:
 
 - **Backend** Python 3.12 + FastAPI + SQLAlchemy 2.x async + Alembic
 - **Worker** [Procrastinate](https://procrastinate.readthedocs.io/) 3.10.0 (Postgres-only, mesma imagem da API)
-- **Frontend** React 18 + TypeScript + Vite + Tailwind + React Router
+- **Frontend** React 18 + TypeScript + Vite + Tailwind + React Router 7
 - **Tipos ponta a ponta** via `openapi-typescript` (regenerados com `just web-types`)
 - **2FA** opcional: TOTP (Google Authenticator) + passkey (WebAuthn/Touch ID)
 - **Rate limit** em `/auth/login` e `/auth/register` (Postgres, sem Redis)
@@ -352,7 +352,7 @@ Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, 
 
 - **Lint/typecheck**:
   - Backend: `ruff` (linter + formatter) + `pyright` (type checker). `just lint`, `just typecheck`.
-  - Frontend: `biome` (linter + formatter + import sort, único tool). `just web-lint`, `just web-lint-fix`. Roda com `--error-on-warnings`: warning bloqueia igual a erro, e as regras relevantes (`noExplicitAny`, `noConsoleLog`, `useImportType`, `noUnusedImports`, `noUnusedVariables`, `noUndeclaredVariables`, `noNonNullAssertion`...) estão em `error`.
+  - Frontend: `biome` 2.x (linter + formatter + import sort, único tool). `just web-lint`, `just web-lint-fix`. Roda com `--error-on-warnings`: warning bloqueia igual a erro, e as regras relevantes (`noExplicitAny`, `noConsole`, `useImportType`, `noUnusedImports`, `noUnusedVariables`, `noUndeclaredVariables`, `noNonNullAssertion`...) estão em `error`. Na 2.x a regra de console é `noConsole` (bloqueia tudo por padrão; o config libera explicitamente tudo **exceto** `console.log`).
   - **SAST**: `just bandit` (backend) + `just semgrep` (regras do projeto em `semgrep.yml`; requer `pipx install semgrep`).
   - Tudo roda em `just ci` (mesmo do GitHub Actions).
 - **Editor (VSCode)**: `.vscode/` tem settings compartilhadas (Biome como formatter default, Ruff no Python, Pyright, Tailwind, etc.), launch configs (API, worker, pytest) e tasks (`just init`, `just dev`, `just ci`, etc.). Abre o workspace e o VSCode oferece instalar as extensões recomendadas.

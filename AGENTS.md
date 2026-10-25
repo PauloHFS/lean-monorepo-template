@@ -55,9 +55,14 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - O lint do front é o Biome (`apps/web/biome.json`) e roda como `npm run lint` = `biome check --error-on-warnings`: warning bloqueia igual a erro.
 - As regras que importam estão em `error`: `noExplicitAny`, `noConsoleLog`, `useImportType`, `useExhaustiveDependencies`, `useAwait`, `noUnusedImports`, `noUnusedVariables`, `noUnusedFunctionParameters`, `noUndeclaredVariables`, `noNonNullAssertion`, `noParameterAssign`, `noUselessElse`.
 - `useNamingConvention` fica `off`: o snake_case vem do contrato da API, não do estilo do código.
-- `files.include` é `["**"]`. O glob `*.{ts,tsx,js,jsx,json}` do Biome 1.9.4 **não casa arquivos da raiz** — com ele, `vite.config.ts`, `playwright.config.ts`, `tailwind.config.js` e `postcss.config.js` escapavam do lint.
+- O Biome está na **2.x** (`@biomejs/biome@^2.6.3`): chaves `files.includes` (negação `!`), `linter.rules.preset: "recommended"` (a `recommended: true` é deprecated e, na 2.x, erro de config **aborta** o run) e `assist.actions.source.organizeImports: "on"`.
+- `noConsoleLog` **não existe** na 2.x: a regra é `noConsole` e ela bloqueia **todo** `console.*` por padrão. O config lista em `options.allow` todos os métodos **exceto** `log` — o mapeamento fiel do `noConsoleLog`. Se alguém inverter essa lista, o gate de `console.log` some em silêncio.
+- `vcs.root: "../.."` é obrigatório: a 2.x não sobe a árvore atrás do `.gitignore` e aborta com "couldn't find an ignore file" sem isso.
+- `files.includes` = `["**", "!**/src/api/schema.d.ts", "!**/public"]`: o schema gerado fica fora e o `public/` também (a 2.x passou a parsear SVG e `a11y/noSvgWithoutTitle` disparava no `favicon.svg`).
+- Tailwind 3 exige `css.parser.tailwindDirectives: true` e `noUnknownAtRules: "off"` (para `@tailwind`/`@apply`).
+- `noFloatingPromises`/`noMisusedPromises` são **nursery** na 2.6.3: não vêm com `recommended` e não estão ligadas.
 - `src/api/schema.d.ts` é gerado e fica fora do lint.
-- Rode `just web-lint` antes de submeter; `just web-lint-fix` aplica as correções automáticas.
+- Rode `just web-lint` antes de submeter; `just web-lint-fix` aplica as correções automáticas (as *unsafe* de `noUnusedVariables`/`noUnusedImports` precisam de `--unsafe` e não são aplicadas).
 
 ### Banco de dados
 

@@ -675,6 +675,57 @@ truncado passava — e **não existia** `restore.sh` nem teste de restauração.
 
 ---
 
+## AD-022 · Biome 2.x e react-router 7 (front)
+
+**Status**: current.
+
+**Context**: o front estava no Biome 1.9.4 — a última release 1.x, sem correção
+de bug ou segurança desde outubro de 2024 (o `latest` já era o 2.6.3). O
+`react-router-dom` 6.30.6 carregava duas CVEs sem patch na linha 6.x
+(GHSA-wrjc-x8rr-h8h6, open redirect via `\` em `<Link>`/`useNavigate`,
+CVE-2026-53669; e GHSA-337j-9hxr-rhxg, constructor injection no hydration SSR,
+CVE-2026-53666): o `npm audit --omit=dev` acusava 2 moderate e o fix exigia v7.
+
+**Decision**:
+- **Biome 2.6.3**: `files.include`/`ignore` → `files.includes` (negação `!`),
+  `linter.rules.recommended` → `preset: "recommended"`,
+  `organizeImports` → `assist.actions.source.organizeImports: "on"`.
+  `noConsoleLog` não existe mais: a regra é `noConsole`, que bloqueia todo
+  `console.*` por padrão, e o config lista em `options.allow` todos os métodos
+  **exceto** `log` — o mapeamento fiel do gate antigo. `vcs.root: "../.."` é
+  obrigatório (a 2.x não sobe atrás do `.gitignore` e aborta sem ele) e
+  `public/` fica fora do lint (a 2.x parseia SVG e `a11y/noSvgWithoutTitle`
+  disparava no favicon). Tailwind 3 exige `css.parser.tailwindDirectives: true` e
+  `noUnknownAtRules: "off"`.
+- **react-router 7.18.4** no lugar do `react-router-dom` (que sai do
+  `package.json`): o pacote `react-router` exige Node ≥20 e React ≥18 — casa com
+  o repo. Declarative Mode (`BrowserRouter`/`Routes`/`Route`) continua suportado,
+  então **não** precisa de `@react-router/dev` nem de config de Framework Mode; os
+  tipos vêm embutidos (sem `@types/react-router`). A única mudança de código são
+  5 imports: `react-router-dom` → `react-router`.
+
+**Consequences**:
+- O `biome migrate --write` **não** serve sozinho: ele gera
+  `noConsole.allow: ["log"]` (inverte a semântica e silencia o gate de
+  `console.log`) e não seta `css.parser.tailwindDirectives` (5 parse errors em
+  `@apply`). O config foi escrito à mão e validado com
+  `biome check --error-on-warnings`.
+- O `npm audit --omit=dev --audit-level=high` (gate de produção do CI) passou a dar
+  **0 vulnerabilidades**: as 2 moderate do react-router 6 sumiram. As 7 restantes
+  do audit completo são todas em devDependencies (vite/esbuild/tailwindcss/
+  postcss) e estão fora do gate.
+- A 2.x reordena imports (assist) e o `lint:fix` passou a aplicar essa
+  reordenação: 4 arquivos de código tiveram diff mecânico, zero mudança de
+  comportamento.
+- `noFloatingPromises`/`noMisusedPromises` são **nursery** na 2.6.3 (não vêm com
+  `recommended`) e `useSortedClasses` foi renomeada (`useTailwindSortedClasses`,
+  exige Tailwind 4): nenhuma entra no gate hoje.
+- `useNavigate()` passa a retornar uma Promise; no código atual o retorno é
+  ignorado, então nada quebra — mas quem chamar `.then()` precisa de `void`/await
+  para não gerar promise flutuante.
+
+---
+
 ## Future ADs (open questions)
 
 - _(none open — all shipped infra is documented above; product-level decisions like
