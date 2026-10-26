@@ -198,9 +198,17 @@ backup-now:
 backup-ls:
     rclone ls $RCLONE_REMOTE_NAME:$RCLONE_BUCKET/
 
-# Prova de restauracao: backup local -> restore -> verificacao (exige Postgres + client no PATH)
+# Prova de restauracao (backup -> restore -> verificacao) dentro do container `postgres`
 test-restore:
-    ./scripts/test-restore.sh
+    {{compose_env}} docker compose up -d --wait postgres
+    {{compose_env}} docker compose run --rm --no-deps --entrypoint bash \
+        -v "$PWD:/repo:ro" -w /repo \
+        -e ENV_FILE=/dev/null \
+        -e POSTGRES_HOST=postgres -e POSTGRES_PORT=5432 \
+        -e POSTGRES_USER="${POSTGRES_USER:-app}" \
+        -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-app}" \
+        -e POSTGRES_DB="${POSTGRES_DB:-app}" \
+        postgres /repo/scripts/test-restore.sh
 
 # Remove caches e artefatos locais
 clean:

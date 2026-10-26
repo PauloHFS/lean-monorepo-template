@@ -157,7 +157,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - `scripts/backup.sh` roda no **host** (exige `pg_dump`/`rclone` no PATH). Sem `RCLONE_BUCKET` ele roda em modo local e mantém o dump. A sanidade do dump é `pg_restore --list`, não o tamanho do arquivo.
 - O dump é criado com `umask 077`/`chmod 600` (contém hashes de senha, TOTP cifrado e PII). `BACKUP_ENCRYPT_PASSPHRASE` o cifra (`openssl enc -aes-256-cbc -pbkdf2`, extensão `.dump.enc`); sem ela o script avisa que o arquivo sai em claro. `BACKUP_KEEP_COUNT` (default 14) é a retenção local; `BACKUP_KEEP_DAYS` é a remota.
 - `scripts/restore.sh` exige alvo explícito (`--db`/`POSTGRES_RESTORE_DB`) e `--yes`: nunca adivinhe o banco de destino.
-- `scripts/test-restore.sh` é a prova: cria bancos `<db>_restore_test_src/dst`, faz backup→restore e confere count, `to_regclass`, md5 do conteúdo, índice, PK e sequência. Ele só opera em banco com `restore_test` no nome. `just test-restore` roda local (exige Postgres + client no PATH); o CI roda o mesmo script no job `restore-test`.
+- `scripts/test-restore.sh` é a prova: cria bancos `<db>_restore_test_src/dst`, faz backup→restore e confere count, `to_regclass`, md5 do conteúdo, índice, PK e sequência. Ele só opera em banco com `restore_test` no nome. `just test-restore` sobe o `postgres` do compose e roda o script dentro desse container (não exige client no host); o CI roda o mesmo script no job `restore-test`.
 
 ### CI e supply chain
 
@@ -209,6 +209,6 @@ Use a menor matriz que cubra a mudança e rode `just ci` antes de submeter alter
 | Versão do Node ou toolchain | `mise install` + `mise ls` (fonte única em `.node-version`) + `npm ci` limpo (o `overrides` do `@hookform/resolvers` só se prova com install do zero) |
 | Qualquer alteração de código coberta pelas regras do `semgrep.yml` | `just semgrep` |
 | Dockerfile, compose ou entrypoint | `just validate-compose` (usa um valor de validação para `GRAFANA_ADMIN_PASSWORD` e materializa um `.env` temporário se preciso) + `bash -n scripts/entrypoint.sh` (sem daemon: `docker compose config --quiet`; o build real, o teto de tamanho da imagem e o **boot do stack** são do job `docker` do CI) + `just e2e-full` com daemon (sobe a stack, roda as migrations e a suíte E2E real) |
-| Backup ou restauração | `bash -n scripts/backup.sh scripts/restore.sh scripts/test-restore.sh` + `just test-restore` (exige Postgres + client no PATH) |
+| Backup ou restauração | `bash -n scripts/backup.sh scripts/restore.sh scripts/test-restore.sh` + `just test-restore` (roda em container; exige Docker, não client no host) |
 
 `just ci` inclui `just semgrep` (SAST), as auditorias de dependências e `just e2e-mock`; não inclui build do frontend, E2E contra a stack real, build Docker, Trivy nem o teste de restauração; rode esses checks quando a mudança os alcançar. O pre-commit não substitui `just ci`.
