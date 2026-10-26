@@ -30,7 +30,7 @@ UuidPK = Annotated[
     mapped_column(
         PG_UUID(as_uuid=True),
         primary_key=True,
-        server_default=func.uuid_generate_v4(),
+        server_default=func.gen_random_uuid(),
     ),
 ]
 CreatedAt = Annotated[
