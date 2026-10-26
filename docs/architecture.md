@@ -1481,6 +1481,82 @@ do Alembic (DDL), que **não** funcionam em `pool_mode=transaction`.
 
 ---
 
+## AD-038 · Auditoria: o que é default e o que é opt-in
+
+**Status**: current.
+
+**Context**: o template registra `created_at`/`updated_at` (default do banco; o
+trigger `set_updated_at()` existe só em `users`) e o audit de auth como log
+estruturado. Surge a pergunta se toda tabela deve ganhar `created_by`/`updated_by`.
+Os frameworks mainstream não fazem isso: Django usa `auto_now_add`/`auto_now` +
+`admin.LogEntry` (só ações do admin, `user` com `CASCADE` apaga a trilha) e o
+`django-auditlog` (delta JSON + actor + action); Rails tem PaperTrail (`versions` +
+`whodunnit` = `current_user.id`, e `lock_version`); Laravel usa
+`spatie/laravel-activitylog` (`activity_log` com `causer`/`subject`/`properties`);
+Prisma documenta `@updatedAt` + exemplo de trigger com GUC; Supabase usa RLS com
+`auth.uid()` + audit logs da plataforma. O padrão é: timestamps automáticos + **uma**
+tabela de log opt-in, com o ator vindo do contexto do request.
+
+**Decision**:
+- O default **não muda**: `created_at`/`updated_at` do banco e o audit de auth como
+  log estruturado (`outcome`, fingerprint sha256 do e-mail, `trace_id`). Esse é o
+  tier que OWASP/ASVS pedem, mas é observabilidade, não trilha consultável: não tem
+  IP/UA, não é transacional e não sobrevive ao delete do usuário.
+- O template **não** adiciona `created_by`/`updated_by`. Nas tabelas atuais o ator é
+  o próprio usuário (register, 2FA, passkey) → coluna tautológica; `DELETE
+  /users/{id}` é hard delete com `CASCADE` → a autoria morre junto (e `RESTRICT`
+  quebraria o delete); nas tabelas de sistema (`kv_cache`, `rate_limits`,
+  `job_rate_limits`, `dead_letters`) não há ator humano. A coluna só se justifica em
+  tabelas de negócio futuras (multi-tenant, admin editando recurso de outro).
+- Auditoria real é **opt-in por projeto e por tabela auditada**: tabela append-only
+  (`<tabela>_audit`), trigger `AFTER INSERT OR UPDATE OR DELETE` gravando o delta em
+  `JSONB`, e o ator via `set_config('app.actor_id', …, true)` na **mesma transação**
+  do DML. A transação explícita é obrigatória porque o `SET LOCAL` morre no fim dela;
+  com pgbouncer em `pool_mode=transaction` isso é seguro por construção (AD-037). A
+  receita completa (DDL, trigger, privilégios, LGPD/retenção) está no README,
+  "Auditoria (receita opt-in)".
+- O ator vem da **sessão validada no servidor** (cookie opaco), nunca do body da
+  request — aceitar `updated_by` do cliente é forjar a trilha.
+- A role da aplicação recebe `INSERT`/`SELECT` na tabela de auditoria, mas
+  **nenhum `UPDATE`/`DELETE`** (`REVOKE`): append-only para a app.
+- LGPD: gravar o **delta**, não before/after completo; omitir colunas sensíveis;
+  identificar o titular por hash/fingerprint; retenção menor que a dos dados de
+  negócio e documentada.
+- O trigger não audita `SELECT` nem DDL — só as três operações de linha.
+
+**Consequences**:
+- Nenhuma migration, campo ou mudança de contrato OpenAPI (`UserOut` fica como
+  está). O default continua barato.
+- Um projeto com requisito de compliance adiciona a receita só nas tabelas que
+  importam: cada tabela auditada ganha um trigger, uma tabela de log e o custo de
+  escrita correspondente.
+- O audit de auth continua sendo log de observabilidade; não o trate como prova de
+  conformidade. A trilha consultável é a tabela opt-in.
+
+**Limites**:
+- Append-only por privilégio **não é WORM**: owner/superuser do banco ainda pode
+  reescrever a tabela. Armazenamento imutável externo não faz parte do template.
+- O trigger roda como invoker; se a role da app não tiver `INSERT` na tabela de
+  auditoria, a DML na tabela auditada falha.
+- Cobertura é DML de linha; `SELECT` e DDL não entram na trilha.
+- A receita é por tabela: não existe auditoria automática de tabelas futuras.
+
+**Rejeitados**:
+- **CDC (`pgoutput` + Debezium) e `pgAudit`**: um segundo sistema para operar, PII no
+  log de sessão e, no CDC, `wal_level=logical`. Custo desproporcional ao template.
+- **Soft delete global**: não é auditoria; exige `WHERE deleted_at IS NULL` em toda
+  query, índice parcial e `UNIQUE NULLS NOT DISTINCT` para não quebrar constraints.
+- **Outbox/event log próprio**: o Procrastinate já é a fila; outbox resolve dual
+  write, não requisito de compliance.
+- **`updated_by` universal**: mesma tautologia do `created_by` nas tabelas atuais.
+- **System versioning / temporal tables do PG18**: **não existem**. O PG18 trouxe
+  apenas *temporal constraints* (`WITHOUT OVERLAPS`/`PERIOD`); o patch do Commitfest
+  2316 foi devolvido em 2021 e as extensões third-party estão paradas.
+- **Expor `xmin`**: é token interno do PG, sofre freeze/wraparound; lock otimista em
+  Core usa uma coluna `version` explícita.
+
+---
+
 ## Future ADs (open questions)
 
 - _(none open — all shipped infra is documented above; product-level decisions like
