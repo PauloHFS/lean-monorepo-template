@@ -171,22 +171,19 @@ jobs:
           PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: "120000"
         run: |
           set -euo pipefail
-          # O --with-deps roda apt-get e trava no lock do dpkg se o proprio
-          # runner estiver em autoupdate (lock held by process NNNN (apt-get)).
-          # Repetir nao resolve: espera o lock liberar (teto 120s por tentativa).
-          wait_apt_lock() {
-            local waited=0
-            while [ "$waited" -lt 120 ]; do
-              if ! command -v fuser >/dev/null 2>&1; then return 0; fi
-              if ! sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then return 0; fi
-              echo "apt-get em execucao no runner (lock do dpkg): aguardando..."
-              sleep 5
-              waited=$((waited + 5))
-            done
-            echo "::warning::o lock do apt nao liberou em 120s; seguindo mesmo assim"
-          }
+          # A imagem do runner ja traz as libs do Chromium e o cache dos browsers
+          # esta semeado: instalar SEM --with-deps evita o apt-get, que disputa o
+          # lock do dpkg. O problema real era o timeout matar o npx e deixar o
+          # apt-get ORFAO segurando o lock -- assim as 3 tentativas falhavam
+          # todas no mesmo lock. O --with-deps fica como fallback, com limpeza.
+          if timeout --kill-after=15s 3m npx playwright install chromium; then
+            exit 0
+          fi
+          echo "::warning::install sem --with-deps falhou; tentando com --with-deps"
           for attempt in 1 2 3; do
-            wait_apt_lock
+            # Mata o apt-get orfao de uma tentativa anterior e libera o lock.
+            sudo pkill -f "apt-get install" >/dev/null 2>&1 || true
+            sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock >/dev/null 2>&1 || true
             if timeout --kill-after=15s 3m npx playwright install --with-deps chromium; then
               exit 0
             fi
