@@ -61,8 +61,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # tini NÃO vem na base Debian slim; instalado só aqui (~algumas centenas de KB)
 # como PID 1 para reap de zumbis. Alternativa seria `init: true` no compose,
 # mas o Dockerfile precisa funcionar via `docker run` puro também.
+#
+# Remove o pip que vem na base: não é usado em runtime (o venv é do uv e não
+# inclui system site-packages) e a cópia da base vendoriza libs com CVE HIGH
+# (msgpack, urllib3, pkg_resources). Remove também o wheel do ensurepip.
 RUN apt-get update && apt-get install -y --no-install-recommends tini \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /usr/local/lib/python3.13/site-packages/pip* \
+              /usr/local/bin/pip* \
+              /usr/local/lib/python3.13/ensurepip/_bundled/pip-*.whl
 
 # Usuário sem shell, uid/gid fixos. Porta >1024 e migrations não gravam disco,
 # então não precisa de root nem de setcap.

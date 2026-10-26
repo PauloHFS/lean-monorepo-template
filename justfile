@@ -10,25 +10,25 @@ default:
 
 # Sobe Postgres + API + worker pela primeira vez
 init:
-    docker compose --profile app up -d --build
+    docker compose up -d --build
     @echo "Aguardando Postgres..."
     @docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 
 # Sobe toda a stack
 up:
-    docker compose --profile app up -d
+    docker compose up -d --build
 
 # Derruba a stack (mantém volumes)
 down:
-    docker compose --profile app down
+    docker compose down
 
 # Derruba a stack e APAGA volumes (CUIDADO)
 down-v:
-    docker compose --profile app down -v
+    docker compose down -v
 
 # Tail dos logs
 logs:
-    docker compose --profile app logs -f --tail=100
+    docker compose logs -f --tail=100
 
 # Instala deps Python (uv sync a partir de pyproject.toml + uv.lock)
 api-install:
@@ -51,6 +51,7 @@ worker-run:
     cd apps/api && uv run python -m app.jobs.runner
 
 # Sobe api + worker + front em paralelo. Ctrl-C derruba tudo.
+# Alternativa ao stack em container: não rode os dois juntos (disputa a porta 8000).
 dev:
     @echo "api    -> http://localhost:$API_PORT"
     @echo "worker -> rodando em foreground"
@@ -104,7 +105,7 @@ ci:
 
 # Sobe a stack + Grafana/Tempo/Prometheus (profile observability)
 up-obs:
-    docker compose --profile observability --profile app up -d
+    docker compose --profile observability up -d
 
 # Typecheck do frontend (separado porque o nome bate com `typecheck` do backend)
 web-typecheck:
@@ -122,9 +123,15 @@ web-audit:
 web-lint-fix:
     cd apps/web && npm run lint:fix
 
-# Confirma que o compose continua válido
+# Confirma que o compose continua válido. Sem .env, materializa um a partir do
+# .env.example (nunca sobrescreve um .env existente) — `env_file: .env` é
+# obrigatório. GRAFANA_ADMIN_PASSWORD vira valor de validação se ausente/vazio,
+# porque a interpolação do Compose é global mesmo sem o profile observability.
 validate-compose:
-    docker compose config --quiet
+    @tmp=""; \
+    if [ ! -f .env ]; then cp .env.example .env; tmp=1; fi; \
+    trap '[ -n "$tmp" ] && rm -f .env' EXIT INT TERM; \
+    GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-validation-only}" docker compose config --quiet
 
 # Instala deps Node
 web-install:
@@ -157,8 +164,8 @@ e2e-mock:
 
 # Sobe a stack e roda E2E contra a SPA servida pela API em :8000 (sobe e desce o compose)
 e2e-full:
-    docker compose --profile app up -d --build
-    cd apps/web && E2E_BASE_URL=http://localhost:8000 npm run e2e; code=$$?; docker compose --profile app down; exit $$code
+    docker compose up -d --build
+    cd apps/web && E2E_BASE_URL=http://localhost:8000 npm run e2e; code=$$?; docker compose down; exit $$code
 
 # Abre a web UI do Mailpit (precisa do compose up)
 mail:

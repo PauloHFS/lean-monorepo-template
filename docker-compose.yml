@@ -1,10 +1,11 @@
 # =============================================================================
 # Stack do lean monorepo.
 # Perfis:
-#   - default: sobe só Postgres (dev leve)
-#   - app:     Postgres + api + worker
+#   - default: postgres + migrate + api + worker (a stack inteira)
 #   - dev:     mailpit (SMTP de captura + web UI), só quando pedido
 #   - observability: otel-collector + tempo + prometheus + grafana
+# Serviços core SEM profile: o Coolify roda `docker compose up -d` sem
+# `--profile` e serviço com profile não sobe.
 # =============================================================================
 name: lean-monorepo
 
@@ -20,7 +21,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
       TZ: ${TZ:-UTC}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # publicado só em loopback — os scripts de backup rodam no host; a
+      # internet não fala com o Postgres
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./scripts/postgres-init:/docker-entrypoint-initdb.d:ro
@@ -32,8 +35,8 @@ services:
 
   # ---- Mailpit: SMTP server com web UI para dev/test ----------------------
   # Captura emails enviados pelo SmtpProvider. Ver em http://localhost:8025
-  # Perfil `dev`: sem ele, `--profile app` exporia um relay SMTP accept-any
-  # (1025) e a UI que lê os emails (8025) mesmo em stacks não-dev.
+  # Perfil `dev`: isolado do stack core; só sobe quando pedido explicitamente
+  # (`--profile dev`), expondo o relay SMTP accept-any (1025) e a UI (8025).
   mailpit:
     image: axllent/mailpit:v1.32.0
     container_name: lm_mailpit
@@ -54,7 +57,6 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: lm_migrate
-    profiles: ["app"]
     restart: "no"
     # One-shot: não serve HTTP, então o HEALTHCHECK da imagem (que sobe o
     # /api/v1/livez) falharia para sempre → "unhealthy" sem significado.
@@ -63,9 +65,6 @@ services:
     env_file: .env
     environment:
       POSTGRES_HOST: postgres
-    volumes:
-      - ./apps/api:/app/apps/api:ro
-      - ./scripts:/app/scripts:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,7 +75,6 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: lm_api
-    profiles: ["app"]
     restart: unless-stopped
     stop_grace_period: 30s
     env_file: .env
@@ -84,10 +82,9 @@ services:
       POSTGRES_HOST: postgres
       SPA_DIST_PATH: /app/apps/web/dist
     ports:
-      - "${API_PORT:-8000}:8000"
-    volumes:
-      - ./apps/api:/app/apps/api:ro
-      - ./scripts:/app/scripts:ro
+      # publicado só em loopback — o proxy (Coolify) fala com o container pelo
+      # IP da rede Docker; em 0.0.0.0 a origem burlaria o proxy
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -100,7 +97,6 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: lm_worker
-    profiles: ["app"]
     restart: unless-stopped
     stop_grace_period: 30s
     # O worker não serve HTTP: o HEALTHCHECK da imagem (que sobe o /api/v1/livez)
@@ -110,9 +106,6 @@ services:
     env_file: .env
     environment:
       POSTGRES_HOST: postgres
-    volumes:
-      - ./apps/api:/app/apps/api:ro
-      - ./scripts:/app/scripts:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -170,7 +163,9 @@ services:
     environment:
       # Obrigatória: sem ela o Grafana 11.3.1 cai no default admin/admin.
       # `:?` faz o compose recusar subir a stack sem credencial explícita.
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?defina GRAFANA_ADMIN_PASSWORD no .env}
+      # A interpolação do Compose é global: o deploy falha sem ela, mesmo sem
+      # o profile observability.
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?defina GRAFANA_ADMIN_PASSWORD (a interpolação do Compose é global: o deploy falha sem ela, mesmo sem o profile observability)}"
     ports:
       - "3000:3000"
     volumes:

@@ -236,5 +236,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Prepare .env for compose validation
+        run: cp .env.example .env
+
       - name: Validate compose file
+        env:
+          GRAFANA_ADMIN_PASSWORD: validation-only
         run: docker compose config --quiet
