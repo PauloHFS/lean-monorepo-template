@@ -308,16 +308,37 @@ O repo **não embute proxy**: a app sobe HTTP puro e o TLS termina no proxy do C
    Preencha `DATABASE_URL` **ou** os `POSTGRES_*` (dentro do compose o host do banco é `postgres`); em Postgres gerenciado, defina `DB_SSLMODE=require`. `GRAFANA_ADMIN_PASSWORD` é exigida **mesmo sem** o profile `observability`: a interpolação `${GRAFANA_ADMIN_PASSWORD:?...}` do Compose é global. O `.env` versionado no repo **não é lido**: o Coolify gera/sobrescreve o `.env` do diretório de deploy e injeta `env_file: ['.env']` — a fonte é a UI.
 3. **Domínio**: só no serviço `api` e com o sufixo da porta interna (`app.example.com:8000`). O `8000` é a porta do container; a publicada no host é só `127.0.0.1:${API_PORT}` e o proxy fala pelo IP da rede Docker.
 4. **Borda** — escolha uma:
-   - **(a) Cloudflare com proxy (nuvem laranja)**: o Traefik precisa confiar nos ranges da Cloudflare para preservar o IP real — `--entrypoints.{http,https}.forwardedHeaders.trustedIPs=<ranges da CF>` (comandos custom do proxy são preservados pelo Coolify). Sem isso a app enxerga só o IP da borda. O certificado vem por DNS challenge da Cloudflare ou Cloudflare Origin Certificate: HTTP-01 não completa com o proxy da CF ligado.
+   - **(a) Cloudflare com proxy (nuvem laranja)**: o Traefik precisa confiar nos ranges da Cloudflare para preservar o IP real — `--entrypoints.{http,https}.forwardedHeaders.trustedIPs=<ranges da CF>` (comandos custom do proxy são preservados pelo Coolify). Sem isso a app enxerga só o IP da borda. O certificado vem por **DNS-01** com Cloudflare (ver **TLS com Cloudflare (DNS-01)** abaixo) ou Cloudflare Origin Certificate: HTTP-01 não completa com o proxy da CF ligado.
    - **(b) Cloudflare Tunnel**: crie o recurso pelo template `cloudflared`, roteie o hostname para `http://localhost:80` e **desligue "Redirect HTTP to HTTPS"** no recurso (senão vira loop). Nesse caminho use `FORWARDED_ALLOW_IPS=127.0.0.1`; o ACME HTTP-01 do Traefik também não completa atrás do tunnel — use DNS challenge ou Origin Cert.
-5. **Backup**: use o **backup agendado do Coolify** para S3/R2 (o modo "database inside a service" lê os `POSTGRES_*` do container). Os `scripts/backup.sh` do repo são o caminho **fora** do Coolify (rodam no host e exigem `pg_dump`).
+5. **Backup**: use o **backup agendado do Coolify** para S3/R2 (passo a passo em **Backup do banco no R2** abaixo). Os `scripts/backup.sh` do repo são o caminho **fora** do Coolify (rodam no host e exigem `pg_dump`).
 6. **Gotchas do Coolify**:
    - não passa `--profile` (bug #6395) — por isso os serviços core não têm profile;
    - o deploy é marcado **FINISHED antes do healthcheck** (não espera `--wait`); a saúde real aparece depois;
    - `container_name`, nome do projeto e volumes são renomeados pelo Coolify;
-   - Docker Compose não faz rolling update;
+   - Docker Compose não faz rolling update nem réplicas (v4.5.0; `scale`/`replicas` > 1 é rejeitado): cada deploy recria os containers, com downtime curto;
+   - o status agregado do resource pode aparecer como `running:unknown` — é **cosmético** (a UI não parseia o health do compose); a saúde real se vê por serviço e por `/api/v1/healthz` (com `db=true`) + `docker compose ps`;
    - `${VAR:?}` é interpolado globalmente (ver `GRAFANA_ADMIN_PASSWORD` acima).
 7. **Sem Coolify**: ponha um proxy próprio (Caddy/nginx) no host terminando TLS em `127.0.0.1:${API_PORT}`. API e Postgres já publicam só em loopback; use `FORWARDED_ALLOW_IPS=127.0.0.1`.
+
+### Backup do banco no R2
+
+No nosso modelo (compose), o Postgres **não** é um database resource da Coolify: ele aparece como **persistent storage** da application (`pgdata`). Por isso o backup nativo da Coolify para ele é o **backup de volume** — um `tar.gz` do data dir, enviado ao S3/R2.
+
+1. **Destinations/S3**: crie um token no **Cloudflare R2** com permissão **"Object Read & Write"** e configure o destination com **Name**, **Bucket**, **Region** (deixe o default), **Access Key** (`<access-key>`) e **Secret Key** (`<secret-key>`). O endpoint é separado em **Protocol** = `https`, **Host** = hostname do endpoint S3 **sem scheme** (ex.: `<conta>.r2.cloudflarestorage.com`), **Port** e **Path** (a Coolify usa o cliente MinIO `mc`).
+2. **Backup schedule** do volume `pgdata`: escolha a frequência, o destination acima e, para consistência, ligue **"Stop during backup"** — a Coolify para os containers que usam o volume durante a cópia (downtime enquanto o backup roda). Sem isso o `tar.gz` do data dir pode sair inconsistente. Configure também a retenção (quantidade de backups, dias e storage máximo).
+3. **Back up now**: executa uma cópia imediata, sem esperar o agendamento.
+4. **Restore**: o restore do volume é **file-level** — exige o **mesmo major do Postgres** e o banco **parado**. Justamente por isso o caminho de restore **confiável** do repo é o dump **lógico**: `scripts/backup.sh` no host (`pg_dump -Fc`, sanidade `pg_restore --list`, cifra opcional), provado por `just test-restore` (roda em container, sem client no host) e pelo job `restore-test` do CI (ver "Backup (R2)").
+
+O backup **lógico** da Coolify (`pg_dump` + **"Import Backup"**) só existe para **databases gerenciados** (um recurso Database da Coolify) — não é o caminho do Postgres do compose. E **não há PITR** em nenhum dos dois caminhos: o restore devolve a última cópia, não um momento arbitrário entre execuções. Quem precisar de PITR precisa de outro provedor; o repo não oferece.
+
+### TLS com Cloudflare (DNS-01)
+
+O ACME **HTTP-01** padrão exige rota pública (não completa com o proxy laranja da Cloudflare nem atrás do tunnel). Para emitir via **DNS-01** com a Cloudflare no Traefik da Coolify:
+
+- env `CF_DNS_API_TOKEN=<token do Cloudflare com permissão "Edit zone DNS">`;
+- comando custom do proxy `--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare`.
+
+Funciona em self-hosted (Lego) e permite wildcard; o storage do ACME é `/traefik/acme.json`. O `coolify-proxy` é 1 por servidor em 80/443 e roteia por `Host`, então vários apps com subdomínios convivem; o toggle "Redirect HTTP to HTTPS" é o `is_force_https_enabled`, e certificado custom/self-signed vai em `/data/coolify/proxy/certs/`. No caminho **Cloudflare Tunnel** (item 4b) o "Redirect HTTP to HTTPS" fica desligado, `FORWARDED_ALLOW_IPS=127.0.0.1` e DNS-01 ou Origin Cert resolvem o certificado.
 
 ---
 

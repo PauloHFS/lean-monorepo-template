@@ -1342,12 +1342,31 @@ AD-032 (proxy confiável) continuam vigentes; esta ADR as conecta ao caminho de 
 - ACME HTTP-01 **não completa** atrás de Cloudflare nem de tunnel → DNS challenge ou Origin
   Certificate.
 - Rate limit de borda do plano Free não substitui o da app.
-- Coolify marca o deploy **FINISHED antes do healthcheck** (não espera `--wait`) e renomeia
-  `container_name`, projeto e volumes; Compose não faz rolling update.
+- Compose na Coolify v4.5.0 **não tem rolling update nem réplicas** (`scale`/`replicas` > 1 é
+  rejeitado) → cada deploy recria os containers, com downtime curto. A Coolify também marca o
+  deploy **FINISHED antes do healthcheck** (não espera `--wait`) e renomeia `container_name`,
+  projeto e volumes.
+- O status agregado do resource compose pode aparecer como `running:unknown`: é **cosmético** —
+  a UI da Coolify não parseia o health do compose (`exclude_from_hc` é o padrão do serviço
+  one-shot de migration). A saúde real se vê por serviço (Runtime Logs/Terminal), por
+  `/api/v1/healthz` (com `db=true`) e por `docker compose ps`.
+- Backup do banco: o Postgres do compose **não** é database resource da Coolify; o backup nativo
+  é o **backup de volume** do `pgdata` (`tar.gz` do data dir) → S3/R2, com `stop_during_backup`
+  (a Coolify para os containers durante a cópia) para consistência. O restore é **file-level**
+  (exige o mesmo major do Postgres e o banco parado), então o caminho de restore confiável é o
+  dump **lógico** do repo (`scripts/backup.sh`, `just test-restore` e job `restore-test` do CI).
+  Sem PITR em nenhum caminho: restaurar devolve a última cópia — PITR exige outro provider, que o
+  repo não oferece.
 - `FORWARDED_ALLOW_IPS` errado falha **em silêncio**: o rate limit passa a compartilhar um
   bucket (ou a aceitar IP forjado), sem erro no boot.
 
 **Rejeitados**:
+- **Um resource da Coolify por componente** (Postgres como database gerenciada + `api`/`worker`/
+  `migrate` como apps separadas): o pre-deployment command da Coolify é **pulado na primeira
+  deploy** — e a migration precisa rodar exatamente na primeira —, a ordem
+  `depends_on: service_completed_successfully` (`migrate` → `api`/`worker`) se perde, o gate de
+  boot do CI (job `docker`) deixa de testar o que roda em prod (drift entre compose testado e
+  deploy real) e as env vars + o build da mesma imagem passam a ser duplicados por resource.
 - Caddy ou `cloudflared` **dentro** do compose: o proxy é do Coolify ou da Cloudflare; o repo
   não mantém um segundo caminho de borda.
 - TLS no uvicorn: a app não tem nem deve ter material de chave; o certificado é do proxy.
