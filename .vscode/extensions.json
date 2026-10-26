@@ -9,10 +9,8 @@
     "editorconfig.editorconfig",
     "ms-azuretools.vscode-docker",
     "ms-playwright.playwright",
-    "vitest.explorer",
     "eamodio.gitlens",
-    "usernamehw.errorlens",
-    "esbenp.prettier-vscode"
+    "usernamehw.errorlens"
   ],
   "unwantedRecommendations": [
     "ms-python.black-formatter",

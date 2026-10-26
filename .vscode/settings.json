@@ -45,7 +45,7 @@
       "source.organizeImports.ruff": "explicit"
     }
   },
-  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.typeCheckingMode": "strict",
   "python.analysis.autoImportCompletions": true,
   "python.analysis.importFormat": "absolute",
   "python.analysis.inlayHints.functionReturnTypes": true,

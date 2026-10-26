@@ -68,7 +68,7 @@
     {
       "label": "lint frontend (biome)",
       "type": "shell",
-      "command": "just web-lint-fix",
+      "command": "just web-lint",
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "shared" }
     },
