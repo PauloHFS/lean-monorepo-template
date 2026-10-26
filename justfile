@@ -5,30 +5,37 @@
 
 set dotenv-load
 
+# A interpolação do Compose é global: sem GRAFANA_ADMIN_PASSWORD o `docker compose`
+# recusa QUALQUER comando (até `down` e `psql`), mesmo sem o profile observability.
+# Estes recipes usam um valor de validação quando a variável não existe no ambiente
+# (o valor real continua valendo quando está setado). `up-obs` NÃO usa o fallback:
+# subir o Grafana exige senha de verdade.
+compose_env := 'GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-validation-only}"'
+
 default:
     @just --list
 
 # Sobe Postgres + API + worker pela primeira vez
 init:
-    docker compose up -d --build
+    {{compose_env}} docker compose up -d --build
     @echo "Aguardando Postgres..."
-    @docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+    @{{compose_env}} docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 
 # Sobe toda a stack
 up:
-    docker compose up -d --build
+    {{compose_env}} docker compose up -d --build
 
 # Derruba a stack (mantém volumes)
 down:
-    docker compose down
+    {{compose_env}} docker compose down
 
 # Derruba a stack e APAGA volumes (CUIDADO)
 down-v:
-    docker compose down -v
+    {{compose_env}} docker compose down -v
 
 # Tail dos logs
 logs:
-    docker compose logs -f --tail=100
+    {{compose_env}} docker compose logs -f --tail=100
 
 # Instala deps Python (uv sync a partir de pyproject.toml + uv.lock)
 api-install:
@@ -163,9 +170,13 @@ e2e-mock:
     cd apps/web && npm run e2e -- e2e/smoke.spec.ts e2e/auth-failure.spec.ts e2e/async-flow.spec.ts
 
 # Sobe a stack e roda E2E contra a SPA servida pela API em :8000 (sobe e desce o compose)
+# Semeia um admin determinístico: POST /users/enqueue-email é superuser-only, e o
+# spec de job precisa de um superuser. E2E_ADMIN_EMAIL/E2E_ADMIN_PASSWORD
+# sobrescrevem os defaults (o seed e o spec usam os mesmos).
 e2e-full:
-    docker compose up -d --build
-    cd apps/web && E2E_BASE_URL=http://localhost:8000 npm run e2e; code=$$?; docker compose down; exit $$code
+    {{compose_env}} docker compose up -d --build
+    {{compose_env}} docker compose exec -T api python -m app.cli create-user "${E2E_ADMIN_EMAIL:-e2e-admin@example.com}" "${E2E_ADMIN_PASSWORD:-e2e-admin-password-123}" "E2E Admin" --superuser
+    cd apps/web && E2E_BASE_URL=http://localhost:8000 E2E_ADMIN_EMAIL="${E2E_ADMIN_EMAIL:-e2e-admin@example.com}" E2E_ADMIN_PASSWORD="${E2E_ADMIN_PASSWORD:-e2e-admin-password-123}" npm run e2e; code=$?; {{compose_env}} docker compose down; exit $code
 
 # Abre a web UI do Mailpit (precisa do compose up)
 mail:
@@ -173,11 +184,11 @@ mail:
 
 # Abre psql dentro do container
 psql:
-    docker compose exec -T postgres psql -U $POSTGRES_USER -d $POSTGRES_DB
+    {{compose_env}} docker compose exec -T postgres psql -U $POSTGRES_USER -d $POSTGRES_DB
 
 # Lista extensões instaladas
 psql-extensions:
-    docker compose exec -T postgres psql -U $POSTGRES_USER -d $POSTGRES_DB -c "\dx"
+    {{compose_env}} docker compose exec -T postgres psql -U $POSTGRES_USER -d $POSTGRES_DB -c "\dx"
 
 # Dispara um backup pontual para o R2
 backup-now:

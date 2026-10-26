@@ -91,31 +91,33 @@ export function Dashboard() {
         )}
       </section>
 
-      <section className="card space-y-3">
-        <h2 className="text-base font-semibold">Disparar job no Postgres</h2>
-        <p className="text-sm text-slate-500">
-          Enfileira um <code>email.send</code> na fila do Procrastinate (Postgres). O worker
-          reivindica o job com <code>SELECT … FOR UPDATE SKIP LOCKED</code>.
-        </p>
-        <button
-          type="button"
-          onClick={() => void handleEnqueue()}
-          disabled={enqueueing}
-          className="btn-primary w-full sm:w-auto"
-        >
-          {enqueueing ? 'Enfileirando…' : 'Enfileirar e-mail'}
-        </button>
-        {enqueueError && (
-          <p role="alert" className="text-sm text-red-600">
-            {enqueueError}
+      {user.is_superuser && (
+        <section className="card space-y-3">
+          <h2 className="text-base font-semibold">Disparar job no Postgres</h2>
+          <p className="text-sm text-slate-500">
+            Enfileira um <code>email.send</code> na fila do Procrastinate (Postgres). O worker
+            reivindica o job com <code>SELECT … FOR UPDATE SKIP LOCKED</code>.
           </p>
-        )}
-        {lastJob && (
-          <p role="status" className="text-sm">
-            Último job: <span className="font-mono">{lastJob.job_id}</span> ({lastJob.status})
-          </p>
-        )}
-      </section>
+          <button
+            type="button"
+            onClick={() => void handleEnqueue()}
+            disabled={enqueueing}
+            className="btn-primary w-full sm:w-auto"
+          >
+            {enqueueing ? 'Enfileirando…' : 'Enfileirar e-mail'}
+          </button>
+          {enqueueError && (
+            <p role="alert" className="text-sm text-red-600">
+              {enqueueError}
+            </p>
+          )}
+          {lastJob && (
+            <p role="status" className="text-sm">
+              Último job: <span className="font-mono">{lastJob.job_id}</span> ({lastJob.status})
+            </p>
+          )}
+        </section>
+      )}
     </main>
   )
 }

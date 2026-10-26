@@ -3,11 +3,16 @@ import { expect, test } from '@playwright/test'
 import { backendAvailable } from './helpers'
 
 /**
- * Jornada crítica: registrar, logar, enfileirar e-mail, ver o job_id aparecer.
- * Exercita o caminho feliz end-to-end: UI -> Vite proxy -> API -> DB.
- * Sem backend real (API/Postgres), o teste skipa.
+ * Jornada crítica da UI contra o stack real (API + Postgres).
+ * - Usuário comum: enqueue-email é superuser-only, então a seção não aparece.
+ * - Admin semeado por `just e2e-full`: enfileira e vê o job_id.
+ * Sem backend real, cada teste pula.
  */
-test('registrar → login → enfileirar job aparece no Dashboard', async ({ page, request }) => {
+
+const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'e2e-admin@example.com'
+const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'e2e-admin-password-123'
+
+test('registrar → login → usuário comum não vê a seção de job', async ({ page, request }) => {
   const available = await backendAvailable(request)
   test.skip(!available, 'backend real indisponível (API/Postgres fora do ar)')
 
@@ -32,10 +37,27 @@ test('registrar → login → enfileirar job aparece no Dashboard', async ({ pag
   // 4. Vê a saudação
   await expect(page.getByText(email)).toBeVisible()
 
-  // 5. Clica em "Enfileirar e-mail"
-  await page.getByRole('button', { name: /enfileirar/i }).click()
+  // 5. Usuário comum não recebe a seção superuser-only de enqueue
+  await expect(page.getByRole('button', { name: /enfileirar/i })).toBeHidden()
+})
 
-  // 6. UI mostra o job_id retornado
-  const jobIdLocator = page.getByText(/Último job:/)
-  await expect(jobIdLocator).toBeVisible({ timeout: 5_000 })
+test('admin (superuser) → enfileirar job aparece no Dashboard', async ({ page, request }) => {
+  const available = await backendAvailable(request)
+  test.skip(!available, 'backend real indisponível (API/Postgres fora do ar)')
+
+  // Admin determinístico semeado pelo `just e2e-full`.
+  await page.goto('/login')
+  await page.getByLabel('E-mail').fill(ADMIN_EMAIL)
+  await page.getByLabel('Senha').fill(ADMIN_PASSWORD)
+  await page.getByRole('button', { name: /entrar/i }).click()
+
+  await expect(page).toHaveURL(/\/dashboard$/)
+
+  // Seção visível e enqueue aceito (superuser).
+  const enqueueButton = page.getByRole('button', { name: /enfileirar/i })
+  await expect(enqueueButton).toBeVisible()
+  await enqueueButton.click()
+
+  // A fila é assíncrona; o job_id aparece quando a API responde.
+  await expect(page.getByText(/Último job:/)).toBeVisible({ timeout: 10_000 })
 })

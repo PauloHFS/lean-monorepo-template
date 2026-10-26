@@ -186,8 +186,11 @@ def upgrade() -> None:
         END;
         $$ LANGUAGE plpgsql;
     """)
+    # Um statement por op.execute: o Alembic roda com engine async (asyncpg),
+    # que usa prepared statement e rejeita múltiplos comandos no mesmo
+    # ("cannot insert multiple commands into a prepared statement").
+    op.execute("DROP TRIGGER IF EXISTS trg_users_updated_at ON users;")
     op.execute("""
-        DROP TRIGGER IF EXISTS trg_users_updated_at ON users;
         CREATE TRIGGER trg_users_updated_at
         BEFORE UPDATE ON users
         FOR EACH ROW EXECUTE FUNCTION set_updated_at();

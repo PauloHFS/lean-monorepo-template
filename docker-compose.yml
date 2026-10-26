@@ -65,6 +65,10 @@ services:
     env_file: .env
     environment:
       POSTGRES_HOST: postgres
+      # Mesmo default do serviço postgres: app e banco precisam concordar.
+      # Sem isso, um .env com POSTGRES_PASSWORD vazio dá DSN sem senha no app
+      # e senha 'app' no banco → "password authentication failed" no boot.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,6 +84,7 @@ services:
     env_file: .env
     environment:
       POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
       SPA_DIST_PATH: /app/apps/web/dist
     ports:
       # publicado só em loopback — o proxy (Coolify) fala com o container pelo
@@ -106,6 +111,7 @@ services:
     env_file: .env
     environment:
       POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
     depends_on:
       postgres:
         condition: service_healthy

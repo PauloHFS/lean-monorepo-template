@@ -1,12 +1,16 @@
 import type { APIRequestContext, Page, Route } from '@playwright/test'
 
-/** Usuário fake para os specs que mockam a sessão. */
+/**
+ * Usuário fake para os specs que mockam a sessão.
+ * Superuser porque o fluxo mockado do Dashboard exercita a seção de enqueue,
+ * que a API restringe a superuser.
+ */
 export const mockUser = {
   id: '00000000-0000-0000-0000-000000000001',
   email: 'e2e-mock@example.com',
   full_name: 'E2E Mock',
   is_active: true,
-  is_superuser: false,
+  is_superuser: true,
 }
 
 /** true se a API real responde /api/v1/healthz em ~2s. Nunca lança. */

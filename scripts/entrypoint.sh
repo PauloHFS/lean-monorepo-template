@@ -17,6 +17,12 @@
 # =============================================================================
 set -euo pipefail
 
+# O `bash -lc` (login shell) executa /etc/profile, que reescreve o PATH e
+# descarta o /opt/venv/bin do ENV da imagem → `alembic`/`uvicorn`/`python`
+# somem e o container morre com exit 127. Garante o venv do uv aqui, para
+# qualquer invocação (compose, `docker run`, k8s).
+export PATH="/opt/venv/bin:${PATH}"
+
 ROLE="${1:-api}"   # migrate | api | worker
 PG_HOST="${POSTGRES_HOST:-}"
 PG_PORT="${POSTGRES_PORT:-5432}"

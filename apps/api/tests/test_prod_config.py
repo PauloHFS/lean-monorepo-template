@@ -68,7 +68,9 @@ def test_prod_rejects_non_https_origin() -> None:
     assert "WEB_ORIGIN" in str(exc_info.value)
 
 
-def test_db_sslmode_default_and_override() -> None:
+def test_db_sslmode_default_and_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    # O .env de dev pode setar DB_SSLMODE; o default é None (sem sslmode).
+    monkeypatch.delenv("DB_SSLMODE", raising=False)
     assert Settings(app_env="local").db_sslmode is None
     assert Settings(app_env="local", db_sslmode="require").db_sslmode == "require"
 

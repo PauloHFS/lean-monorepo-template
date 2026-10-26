@@ -95,7 +95,14 @@ async def _seed() -> None:
     print(f"senha (guarde, não será mostrada de novo): {password}")
 
 
-async def _create_user(email: str, password: str, full_name: str | None) -> None:
+async def _create_user(
+    email: str, password: str, full_name: str | None, *, superuser: bool = False
+) -> None:
+    """Cria o usuário ou garante o existente (idempotente).
+
+    `superuser=True` promove; um usuário comum NUNCA rebaixa um admin
+    (`users.is_superuser OR EXCLUDED.is_superuser`).
+    """
     ph = hash_password(password)
     async with SessionLocal() as session:
         async with session.begin():
@@ -104,12 +111,16 @@ async def _create_user(email: str, password: str, full_name: str | None) -> None
                     await session.execute(
                         text(
                             """
-                        INSERT INTO users (email, password_hash, full_name)
-                        VALUES (:e, :ph, :n)
-                        RETURNING id, email, full_name
-                        """
+                            INSERT INTO users (email, password_hash, full_name, is_superuser)
+                            VALUES (:e, :ph, :n, :su)
+                            ON CONFLICT (email) DO UPDATE
+                              SET password_hash = EXCLUDED.password_hash,
+                                  full_name = COALESCE(EXCLUDED.full_name, users.full_name),
+                                  is_superuser = users.is_superuser OR EXCLUDED.is_superuser
+                            RETURNING id, email, full_name, is_superuser
+                            """
                         ),
-                        {"e": email, "ph": ph, "n": full_name},
+                        {"e": email, "ph": ph, "n": full_name, "su": superuser},
                     )
                 )
                 .mappings()
@@ -117,7 +128,7 @@ async def _create_user(email: str, password: str, full_name: str | None) -> None
             )
         if row is None:
             raise RuntimeError("INSERT de usuário não retornou linha")
-        print(f"created: id={row['id']} email={row['email']}")
+        print(f"ok: id={row['id']} email={row['email']} superuser={row['is_superuser']}")
 
 
 async def _enqueue_job(kind: str, payload_json: str) -> None:
@@ -269,9 +280,16 @@ def _need(rank: str, n: int, args: list[str], usage_msg: str) -> int:
 
 
 async def cmd_create_user(args: list[str]) -> int:
-    if rc := _need("create-user", 2, args, "<email> <password> [name]"):
+    if rc := _need("create-user", 2, args, "<email> <password> [name] [--superuser]"):
         return rc
-    await _create_user(args[0], args[1], args[2] if len(args) > 2 else None)
+    superuser = "--superuser" in args
+    positional = [a for a in args if a != "--superuser"]
+    await _create_user(
+        positional[0],
+        positional[1],
+        positional[2] if len(positional) > 2 else None,
+        superuser=superuser,
+    )
     return 0
 
 
@@ -352,7 +370,7 @@ def usage() -> None:
         "uso:\n"
         "  python -m app.cli dump-openapi\n"
         "  python -m app.cli seed\n"
-        "  python -m app.cli create-user <email> <password> [name]\n"
+        "  python -m app.cli create-user <email> <password> [name] [--superuser]\n"
         "  python -m app.cli enqueue-job <kind> [payload-json]\n"
         "  python -m app.cli list-dead-letters [limit]\n"
         "  python -m app.cli retry-dead-letter <id>\n"

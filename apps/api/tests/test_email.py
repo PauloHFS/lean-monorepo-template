@@ -14,7 +14,10 @@ def teardown_function(_) -> None:
     get_provider.cache_clear()
 
 
-def test_default_provider_is_smtp() -> None:
+def test_default_provider_is_smtp(monkeypatch: pytest.MonkeyPatch) -> None:
+    # O .env de dev pode setar SMTP_HOST/SMTP_PORT; o default do provider é fixo.
+    monkeypatch.delenv("SMTP_HOST", raising=False)
+    monkeypatch.delenv("SMTP_PORT", raising=False)
     p = get_provider()
     assert isinstance(p, SmtpProvider)
     assert p.host == "localhost"
