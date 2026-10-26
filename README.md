@@ -361,6 +361,12 @@ Funciona em self-hosted (Lego) e permite wildcard; o storage do ACME é `/traefi
 
 ---
 
+## Tuning e escala
+
+Quando a VPS padrão (4 vCPU/8 GB, Postgres no mesmo host) começa a apertar, o primeiro gargalo é conexão/pool do banco, não a API. `docs/tuning.md` traz o dimensionamento por faixa de VPS, os knobs do Postgres por RAM, quando ligar o pgbouncer (e as incompatibilidades do transaction mode), o tuning do uvicorn/bcrypt e a tabela de medição (sinal → ação) — além do que a Coolify v4.5.0 não oferece (rolling update, réplicas, PITR).
+
+---
+
 ## Email transacional
 
 **SMTP-only.** Um caminho de código, qualquer provedor.
