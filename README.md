@@ -88,6 +88,15 @@ Pra criar um admin e logar:
 docker compose exec api python -m app.cli seed   # imprime email + senha aleatória
 ```
 
+Para um admin com senha conhecida (útil em E2E/local):
+
+```bash
+docker compose exec api python -m app.cli create-user admin@example.com minha-senha "Admin" --superuser
+```
+
+`create-user` é idempotente: se o e-mail já existe, atualiza a senha e garante o papel —
+`--superuser` promove, mas nunca rebaixa um admin existente.
+
 ## Dev local (Postgres em Docker, app no host)
 
 Útil quando você quer editar o código com HMR sem rebuildar a imagem:
@@ -431,7 +440,7 @@ No front, os tipos vêm de `components["schemas"][...]` (reexportados em `src/ap
 - **e2e**: Playwright nos cenários mockados (`page.route`), sem API/DB
 - **schema-sync**: regenera `schema.d.ts` e falha se estiver desatualizado
 - **compose**: valida que `docker-compose.yml` continua válido
-- **docker**: build da imagem + medição do tamanho real (teto de 700 MB) + Trivy (CRITICAL/HIGH bloqueia)
+- **docker**: build da imagem + medição do tamanho real (teto de 700 MB) + **boot do stack** (readiness `db=true`, `alembic_version`, worker vivo) + Trivy (CRITICAL/HIGH bloqueita)
 
 `.github/workflows/restore-test.yml` roda backup → restore → verificação num Postgres efêmero.
 
@@ -458,7 +467,7 @@ Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, 
 - **Segredos**: NUNCA comitar `.env`. Em prod, monte via secret manager do orquestrador.
 - **Logs**: `structlog` JSON em prod, console em dev (stderr pra não poluir stdout).
 - **Tests**: `just test` roda a suite de 169 testes. Tudo que não precisa de DB.
-- **E2E**: `just e2e-mock` roda só os cenários mockados (`page.route`, sem API/DB — é o que o CI roda); `just e2e` roda a suíte inteira pulando o que precisa de backend; `just e2e-full` sobe o stack e roda contra a SPA servida pela API em `:8000`.
+- **E2E**: `just e2e-mock` roda só os cenários mockados (`page.route`, sem API/DB — é o que o CI roda); `just e2e` roda a suíte inteira pulando o que precisa de backend; `just e2e-full` sobe o stack e roda contra a SPA servida pela API em `:8000` (semeia um superuser determinístico, porque `POST /users/enqueue-email` é superuser-only).
 
 ---
 

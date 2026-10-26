@@ -218,6 +218,35 @@ jobs:
             exit 1
           }
 
+      # Boota o stack de verdade: "build + scan" não pega entrypoint quebrado
+      # (exit 127), migration que não aplica nem health que não volta. Foi
+      # assim que o exit-127 do login shell e o `alembic` quebrado chegaram à main.
+      - name: Boot do stack (migrate + api + worker)
+        env:
+          GRAFANA_ADMIN_PASSWORD: validation-only
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          if ! docker compose up -d; then
+            docker compose logs migrate api || true
+            exit 1
+          fi
+          # api tem que responder readiness com o banco de pé
+          for _ in $(seq 1 30); do
+            if curl -fs http://127.0.0.1:8000/api/v1/healthz 2>/dev/null | grep -q '"db":true'; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8000/api/v1/healthz
+          echo
+          # migration aplicada de verdade
+          docker compose exec -T postgres psql -U app -d app \
+            -c 'select version_num from alembic_version'
+          # worker vivo
+          docker compose ps --services --filter status=running | grep -qx worker
+          docker compose down -v
+
       - name: Trivy (vulns na imagem)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

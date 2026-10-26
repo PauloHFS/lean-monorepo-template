@@ -111,7 +111,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - Specs vivem em `apps/web/e2e/` e rodam com `just e2e` (o `playwright.config.ts` sobe o Vite sozinho quando `E2E_BASE_URL` é a porta do Vite).
 - Cenários de falha de autenticação e fluxos assíncronos usam `page.route` (mock): rodam sem API/DB e é isso que o CI executa (`just e2e-mock`).
 - Spec que exige a API real deve **pular** quando ela não estiver disponível (`backendAvailable` em `e2e/helpers.ts`) — falhar por falta de stack esconde regressão real.
-- `just e2e-full` sobe o compose e roda contra a SPA servida pela API em `:8000` (`E2E_BASE_URL=http://localhost:8000`).
+- `just e2e-full` sobe o compose e roda contra a SPA servida pela API em `:8000` (`E2E_BASE_URL=http://localhost:8000`). O recipe semeia um superuser determinístico (`app.cli create-user ... --superuser`; `E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASSWORD` sobrescrevem o default) porque `POST /users/enqueue-email` é superuser-only, e o Dashboard só mostra a seção de job para superuser.
 - Use seletores acessíveis (`getByRole`/`getByLabel`); não crie `data-testid` novo.
 
 ### Observabilidade e tracing
@@ -147,6 +147,10 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - **Compose para deploy**: `postgres`, `migrate`, `api` e `worker` **não têm `profiles:`**. Não reintroduza — o Coolify roda `docker compose up -d` sem `--profile` (bug #6395) e serviço com profile não sobe. Não reintroduza bind-mount de `./apps/api` ou `./scripts` sobre a imagem: a imagem buildada é a fonte da verdade e o bind-mount mascararia o artefato (o compose só mantém o mount read-only de `./scripts/postgres-init` e dos YAMLs de observability).
 - `env_file: .env` é **obrigatório** em `migrate`, `api` e `worker`. Em clone fresco, `just validate-compose` (e o job `compose` do CI) materializam um `.env` temporário a partir do `.env.example` e o removem no fim; para uso real, `cp .env.example .env` e preencha os segredos.
 - O job `docker` do CI **mede o tamanho real da imagem** e falha acima do teto (700 MB): a imagem atual mede **294,7 MB**. A estimativa local (~250–450 MB) era chute; quem manda é o gate.
+- O mesmo job **boota o stack** (`docker compose up -d` → readiness `db=true` → `alembic_version` → worker vivo): build+scan não pega entrypoint quebrado (exit 127), migration que não aplica nem health que não volta. Foi o boot que expôs os dois bugs abaixo — nenhum dos dois era visível em build, lint ou unit test.
+- O entrypoint **exporta o PATH do venv** (`/opt/venv/bin`): o `bash -lc` do compose executa `/etc/profile`, que reescreve o PATH e faz `alembic`/`uvicorn`/`python` sumirem (exit 127 em `migrate`, `api` e `worker`).
+- `op.execute` do Alembic leva **um statement por chamada**: o Alembic roda com engine async (asyncpg), que usa prepared statement e rejeita múltiplos comandos ("cannot insert multiple commands into a prepared statement").
+- App e banco usam o **mesmo** `POSTGRES_PASSWORD`: o compose replica `${POSTGRES_PASSWORD:-app}` para `migrate`/`api`/`worker`. Sem isso, um `.env` com a senha vazia deixa o app com DSN sem senha e o banco exigindo senha → "password authentication failed" no boot (o `pg_hba` exige `scram-sha-256` na rede do Docker).
 
 ### Backup e restauração
 
@@ -203,7 +207,7 @@ Use a menor matriz que cubra a mudança e rode `just ci` antes de submeter alter
 | Dependências Python ou npm | `just api-audit` e `just web-audit` |
 | Versão do Node ou toolchain | `mise install` + `mise ls` (fonte única em `.node-version`) + `npm ci` limpo (o `overrides` do `@hookform/resolvers` só se prova com install do zero) |
 | Qualquer alteração de código coberta pelas regras do `semgrep.yml` | `just semgrep` |
-| Dockerfile, compose ou entrypoint | `just validate-compose` (usa um valor de validação para `GRAFANA_ADMIN_PASSWORD` e materializa um `.env` temporário se preciso) + `bash -n scripts/entrypoint.sh` (sem daemon: `docker compose config --quiet`; o build real e o teto de tamanho da imagem são do job `docker` do CI) |
+| Dockerfile, compose ou entrypoint | `just validate-compose` (usa um valor de validação para `GRAFANA_ADMIN_PASSWORD` e materializa um `.env` temporário se preciso) + `bash -n scripts/entrypoint.sh` (sem daemon: `docker compose config --quiet`; o build real, o teto de tamanho da imagem e o **boot do stack** são do job `docker` do CI) + `just e2e-full` com daemon (sobe a stack, roda as migrations e a suíte E2E real) |
 | Backup ou restauração | `bash -n scripts/backup.sh scripts/restore.sh scripts/test-restore.sh` + `just test-restore` (exige Postgres + client no PATH) |
 
 `just ci` inclui `just semgrep` (SAST), as auditorias de dependências e `just e2e-mock`; não inclui build do frontend, E2E contra a stack real, build Docker, Trivy nem o teste de restauração; rode esses checks quando a mudança os alcançar. O pre-commit não substitui `just ci`.
