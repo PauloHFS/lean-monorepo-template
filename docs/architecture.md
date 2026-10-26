@@ -1207,7 +1207,11 @@ então o schema é impossível sem a extensão.
 - `citext` permanece um requisito duro do schema, documentado no README/AGENTS.
 - Bancos existentes não precisam remover `uuid-ossp`; a mudança só vale para instalações novas.
 - Volume de PG16/17 **não** é reutilizável no PG18 por causa do novo `PGDATA`: instalações
-  existentes precisam de dump/restore (o caminho lógico do repo) e de um volume novo.
+  existentes precisam de dump/restore (o caminho lógico do repo) e de um volume novo. O sintoma é
+  o container do Postgres em loop de restart com `mkdir: can't create directory
+  '/var/lib/postgresql/18/': Permission denied` — o volume antigo pertence ao uid 999 (Debian) e o
+  Alpine do PG18 roda como uid 70; o cluster precisa ser recriado (dump com o client do major
+  antigo, restore com o client do novo, volume novo).
 
 ---
 

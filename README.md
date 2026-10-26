@@ -169,6 +169,15 @@ No compose, troque `image: postgres:18-alpine` por `build: { context: ., dockerf
 
 **Postgres gerenciado com PostGIS** (ex.: RDS oferece a extensão): aponte `DATABASE_URL` para o banco e defina `DB_SSLMODE` (ex.: `require`); a API já aceita essa configuração. O init só roda no compose local — no banco gerenciado, crie a extensão pelo console/`psql`.
 
+### Upgrade do Postgres (volume de major antigo)
+
+O major novo muda o `PGDATA` (no PG18 é `/var/lib/postgresql/18/docker`), então **um volume de PG16/17 não sobe no PG18**. O sintoma é o container do Postgres em **loop de restart** com `mkdir: can't create directory '/var/lib/postgresql/18/': Permission denied` — o volume antigo pertence ao uid 999 (Debian) e o Alpine do PG18 roda como uid 70. O caminho é:
+
+1. **Dump no major antigo** — `just backup-now` (ou `scripts/backup.sh` no host; o `pg_dump` precisa ser do major do servidor).
+2. **Volume novo** — no Coolify, o volume é do resource: esvazie/recrie antes do novo deploy (`docker run --rm -v <volume>:/v alpine sh -c 'rm -rf /v/* /v/.[!.]*'` deixa o cluster se inicializar no path novo). Em dado descartável, pular o restore é suficiente.
+3. **Restore** com o client do **major novo** (o `pg_restore` exige client ≥ servidor): `scripts/restore.sh <dump> --db app --yes`.
+4. **Deploy de novo** — o container `migrate` aplica a baseline no banco novo.
+
 Quando algum caso *realmente* pede Redis (pub/sub com baixa latência, geofencing com milhões de updates/s), você sabe que é exceção — não o default.
 
 ---
