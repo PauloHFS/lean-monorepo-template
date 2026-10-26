@@ -52,8 +52,8 @@ lib via `SchemaManager.apply_schema()` in the migration — no duplication.
 - Periodic tasks built-in (`@app.periodic(cron="...")`).
 - Trade-off: a few advanced Celery features (chains, chords, fanout canvas) aren't available.
   For our use cases, the `@app.task` decorator + `defer_async` covers everything.
-- See `apps/api/app/jobs/app.py` for the wiring and `apps/api/app/jobs/tasks/email.py` for an
-  example task.
+- See `apps/api/app/jobs/app.py` for `register_task`/`defer_job` and
+  `apps/api/app/jobs/tasks/email.py` for an example task.
 
 ---
 
@@ -918,11 +918,10 @@ dependências estavam **declaradas e sem uso**: `python-multipart` e
   `alembic.ini` foi atualizado para não emitir warning.
 
 **Consequences**:
-- **bcrypt 5.0.0 agora rejeita senhas acima de 72 bytes** (`ValueError`) em vez
-  de truncar em silêncio. O repo **já truncava** em 72 bytes antes de chamar a
-  lib (`core/security.py`), então hash e verificação continuam consistentes —
-  o que muda é o texto: "o repo trunca; o bcrypt 5.x rejeita acima de 72 bytes".
-  Um `hash_password` sem truncamento passaria a estourar `ValueError`.
+- **bcrypt 5.0.0 rejeita senhas acima de 72 bytes** (`ValueError`) em vez de
+  truncar em silêncio. O app faz a mesma checagem na fronteira (tipo `Password`)
+  e em `_to_bytes`: senhas multibyte acima de 72 bytes são rejeitadas, nunca
+  truncadas.
 - O `OpenAPI` gerado ficou **byte-idêntico** (33.514 bytes antes e depois): o
   Pydantic ≥2.11 passou a emitir `additionalProperties: true` para
   `dict[str, Any]`, mas nenhum `response_model` do repo usa `dict` — todos são
@@ -936,6 +935,62 @@ dependências estavam **declaradas e sem uso**: `python-multipart` e
   vira `reportUnnecessaryCast`).
 - `pip-audit` continua em "No known vulnerabilities found" e o `uv lock --check`
   passa. A auditoria de produção do front segue em 0.
+
+---
+
+## AD-027 · Jobs padronizados, rate limit por janela fixa e DLQ no Postgres
+
+**Status**: current.
+
+**Context**: as tasks eram registradas à mão com `@app.task(name=...)`: o nome
+podia divergir da queue, não havia proteção contra rajadas de enqueue e uma
+falha que esgotava o retry do Procrastinate desaparecia sem rastro. O template
+já é Postgres-only (AD-001), então rate limit e DLQ devem viver no mesmo banco,
+sem Redis/Celery.
+
+**Decision**:
+- `register_task(queue, action, *, max_retries=3, pass_context=True, **kwargs)`
+  valida queue/action (minúsculos, sem `.` nem espaço) e registra
+  `name=f"{queue}.{action}"`, `queue=queue`. `max_retries` é o número de novas
+  tentativas que o Procrastinate faz (0 = uma execução só); não existe retry
+  infinito, senão a falha nunca vira dead letter.
+- `defer_job(task, *, rate_limit_kind=None, rate_limit_key="",
+  rate_limit_limit=None, rate_limit_window_s=60, **kwargs)` chama
+  `check_job_rate_limit` antes de `task.defer_async(**kwargs)` quando há
+  kind+limit configurados.
+- `job_rate_limits (kind, key, window_start, count)` tem PK composta
+  `(kind, key, window_start)`. A janela é fixa e alinhada ao epoch:
+  `to_timestamp(floor(extract(epoch from now()) / :window) * :window)`; o
+  `INSERT ... ON CONFLICT DO UPDATE ... RETURNING count` conta a tentativa e
+  levanta `JobRateLimitExceeded` quando `count > limit`. O handler em
+  `app/main.py` transforma a exceção em **429**.
+- `dead_letters (id SERIAL, kind, key, payload JSONB, error, retries,
+  original_job_id, status, created_at, resolved_at)` é preenchida pelo wrapper
+  de `register_task`: a falha é registrada e a exceção relançada, então o retry
+  do Procrastinate continua valendo. A gravação acontece só na **última**
+  tentativa — a decisão de retry é a mesma do Procrastinate
+  (`RetryStrategy.get_retry_decision`), então há uma linha por job que
+  desistiu, não uma por tentativa. `JobAborted` não é falha e não entra na
+  DLQ. `original_job_id` vem de `ctx.job.id` quando `pass_context=True`.
+- `apps/api/app/cli.py` expõe `list-dead-letters`, `retry-dead-letter <id>`
+  (reenfileira o payload pela task do `kind` e marca `retried`) e
+  `discard-dead-letter <id>` (marca `discarded`).
+- Os modelos ORM `JobRateLimit`/`DeadLetter` espelham as tabelas para
+  schema/Alembic (`app/db/models/jobs.py`).
+
+**Consequences**:
+- Nome e queue não podem divergir; o worker encontra a task pelo nome
+  `<queue>.{action}`.
+- Retry é sempre finito e a DLQ é o destino final do job que falhou.
+- Rate limit é transacional e distribuído com o resto do Postgres (janela fixa:
+  pode haver rajada na virada da janela, trade-off aceito pela simplicidade).
+- Falhas ficam auditáveis e reexecutáveis pela CLI; a DLQ não substitui o retry
+  do Procrastinate.
+- pg_cron limpa `job_rate_limits` com mais de 1 dia a cada 15min e
+  `dead_letters` não-`pending` com mais de 90 dias diariamente.
+- Testes (`apps/api/tests/test_jobs.py`) cobrem nomes, SQL da janela, contagem
+  do rate limit e o wrapper de DLQ (grava só na última tentativa, ignora
+  `JobAborted`) sem tocar Postgres (AD-008).
 
 ---
 

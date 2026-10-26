@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.v1 import api_router
 from app.core.config import settings
+from app.core.jobs import JobRateLimitExceeded
 from app.core.logging import get_logger
 from app.core.middleware import SecurityHeadersMiddleware, TraceIdMiddleware
 from app.core.observability import (
@@ -125,6 +126,17 @@ else:
 # -----------------------------------------------------------------------------
 # Erros não tratados
 # -----------------------------------------------------------------------------
+@app.exception_handler(JobRateLimitExceeded)
+async def job_rate_limit_exceeded(request: Request, exc: JobRateLimitExceeded):  # noqa: ARG001
+    """Rate limit de job enfileirado: 429, não 500."""
+    log.warning("job rate limit excedido", kind=exc.kind, key=exc.key)
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "job rate limit exceeded"},
+        headers={"Retry-After": str(exc.window_s)},
+    )
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception(request: Request, exc: Exception):  # noqa: ARG001
     log.exception("unhandled", path=str(request.url))

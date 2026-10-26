@@ -39,6 +39,9 @@ SessionLocal = async_sessionmaker(
     autocommit=False,
     class_=AsyncSession,
 )
+# Alias explícito para código de infraestrutura (jobs/CLI) que abre a própria
+# sessão em vez de receber a dependency do FastAPI.
+AsyncSessionLocal = SessionLocal
 
 
 async def get_db() -> AsyncGenerator[AsyncSession]:

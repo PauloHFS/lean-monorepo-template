@@ -13,6 +13,7 @@ from app.api.deps import DB, CurrentUser
 from app.api.schemas import UserOut
 from app.core.observability import inject_trace_context
 from app.core.ratelimit import rate_limit
+from app.jobs.app import defer_job
 from app.jobs.tasks.email import send_email
 
 router = APIRouter()
@@ -88,5 +89,12 @@ async def enqueue_email(payload: EnqueueEmailIn, user: CurrentUser) -> EnqueueEm
         job_payload = inject_trace_context(
             {"to": payload.to, "subject": payload.subject, "text": payload.body}
         )
-        job_id = await send_email.defer_async(**job_payload)
+        job_id = await defer_job(
+            send_email,
+            rate_limit_kind="email.send",
+            rate_limit_key=f"user:{user.id}",
+            rate_limit_limit=20,
+            rate_limit_window_s=60,
+            **job_payload,
+        )
     return EnqueueEmailOut(job_id=job_id, status="queued")

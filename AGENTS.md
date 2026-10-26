@@ -82,7 +82,13 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 
 ### Filas e jobs
 
-- Jobs entram pela fila do Procrastinate (`send_email.defer_async(...)`), a mesma task que o worker executa. O `trace_context` viaja no payload (`inject_trace_context`).
+- Tasks são declaradas com `register_task(queue, action)` (`app/jobs/app.py`), que valida queue/action minúsculos e sem ponto/espaço e registra `name=f"{queue}.{action}"` na queue correspondente. A `email.send` é o exemplo (`send_email`).
+- `register_task(queue, action, *, max_retries=3)`: `max_retries` é quantas vezes o Procrastinate tenta de novo (0 = uma execução só). Retry infinito não existe — sem teto, a falha nunca vira dead letter.
+- Enfileiramento passa por `defer_job(task, ...)`: quando `rate_limit_kind`/`rate_limit_limit` são passados, ele consulta `job_rate_limits` (janela fixa alinhada ao epoch) antes de `defer_async`.
+- `register_task` liga a DLQ: a falha só vira `dead_letters` (`kind`, `key`, `payload` com `kwargs`/`attempts`, `error`, `original_job_id` do `ctx`) na **última** tentativa — a mesma decisão de retry do Procrastinate —, então há uma linha por job que desistiu, não uma por tentativa. `JobAborted` não é falha e não entra na DLQ.
+- `job_rate_limits` e `dead_letters` são criadas na baseline; o cleanup roda via pg_cron (rate limits a cada 15min; dead letters não-pending com >90 dias diariamente).
+- A DLQ é operável por CLI: `python -m app.cli list-dead-letters [limit]`, `retry-dead-letter <id>` e `discard-dead-letter <id>`.
+- `JobRateLimitExceeded` vira **429** (não 500) via handler em `app/main.py`.
 - `job_id` é o id do Procrastinate (inteiro), não um UUID.
 
 ### Testes

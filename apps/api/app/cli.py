@@ -5,6 +5,9 @@ Uso:
     python -m app.cli seed                       # cria admin@example.com (primeiro dev)
     python -m app.cli create-user email@x.com senha123 "Nome"
     python -m app.cli enqueue-job email.send '{"to":"a@b.com"}'
+    python -m app.cli list-dead-letters [limit]
+    python -m app.cli retry-dead-letter <id>
+    python -m app.cli discard-dead-letter <id>
     python -m app.cli db-status
 """
 
@@ -16,7 +19,7 @@ import secrets
 import string
 import sys
 from collections.abc import Callable, Coroutine
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import text
 
@@ -24,6 +27,7 @@ from app.core.logging import get_logger
 from app.core.security import hash_password
 from app.db.session import SessionLocal
 from app.jobs.app import app as procrastinate_app
+from app.jobs.app import defer_job
 from app.jobs.tasks.email import send_email
 from app.main import app as fastapi_app
 
@@ -128,8 +132,103 @@ async def _enqueue_job(kind: str, payload_json: str) -> None:
         raise SystemExit(f"kind desconhecido: {kind} (conhecidos: {sorted(tasks)})")
     # defer_async exige o App aberto (pool de conexões).
     async with procrastinate_app.open_async():
-        job_id = await task.defer_async(**payload)
+        job_id = await defer_job(task, **payload)
     print(f"queued: id={job_id} task={kind}")
+
+
+async def _list_dead_letters(limit: int) -> None:
+    async with SessionLocal() as session:
+        rows = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT id, kind, key, status, retries, created_at, error "
+                        "FROM dead_letters ORDER BY created_at DESC LIMIT :limit"
+                    ),
+                    {"limit": limit},
+                )
+            )
+            .mappings()
+            .all()
+        )
+    if not rows:
+        print("nenhuma dead letter")
+        return
+    for row in rows:
+        print(
+            f"#{row['id']} kind={row['kind']} key={row['key']!r} "
+            f"status={row['status']} retries={row['retries']} "
+            f"created_at={row['created_at']} error={row['error']}"
+        )
+
+
+async def _retry_dead_letter(dead_letter_id: int) -> None:
+    async with SessionLocal() as session:
+        row = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT id, kind, payload FROM dead_letters "
+                        "WHERE id = :id AND status = 'pending'"
+                    ),
+                    {"id": dead_letter_id},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if row is None:
+            raise SystemExit(f"dead letter {dead_letter_id} não encontrada ou já resolvida")
+
+        task = cast(Any, procrastinate_app).tasks.get(row["kind"])
+        if task is None:
+            raise SystemExit(f"task {row['kind']!r} não registrada")
+
+        stored = cast(dict[str, Any], row["payload"]) if isinstance(row["payload"], dict) else {}
+        kwargs = cast(dict[str, Any], stored.get("kwargs", stored))
+        async with procrastinate_app.open_async():
+            job_id = await task.defer_async(**kwargs)
+
+        updated = (
+            (
+                await session.execute(
+                    text(
+                        "UPDATE dead_letters SET status = 'retried', "
+                        "retries = retries + 1, resolved_at = now() "
+                        "WHERE id = :id AND status = 'pending' RETURNING id"
+                    ),
+                    {"id": dead_letter_id},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        await session.commit()
+
+    if updated is None:
+        raise SystemExit(f"dead letter {dead_letter_id} mudou de estado; não foi marcada")
+    print(f"requeued: dead_letter={dead_letter_id} job_id={job_id} task={row['kind']}")
+
+
+async def _discard_dead_letter(dead_letter_id: int) -> None:
+    async with SessionLocal() as session:
+        row = (
+            (
+                await session.execute(
+                    text(
+                        "UPDATE dead_letters SET status = 'discarded', resolved_at = now() "
+                        "WHERE id = :id AND status = 'pending' RETURNING id"
+                    ),
+                    {"id": dead_letter_id},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        await session.commit()
+    if row is None:
+        raise SystemExit(f"dead letter {dead_letter_id} não encontrada ou já resolvida")
+    print(f"discarded: dead_letter={dead_letter_id}")
 
 
 async def _db_status() -> None:
@@ -183,6 +282,44 @@ async def cmd_enqueue_job(args: list[str]) -> int:
     return 0
 
 
+def _parse_dead_letter_id(action: str, args: list[str]) -> int | None:
+    if _need(action, 1, args, "<id>"):
+        return None
+    try:
+        return int(args[0])
+    except ValueError:
+        sys.stderr.write(f"uso: {action} <id> (id numérico)\n")
+        return None
+
+
+async def cmd_list_dead_letters(args: list[str]) -> int:
+    limit = 20
+    if args:
+        try:
+            limit = int(args[0])
+        except ValueError:
+            sys.stderr.write("uso: list-dead-letters [limit]\n")
+            return 2
+    await _list_dead_letters(limit)
+    return 0
+
+
+async def cmd_retry_dead_letter(args: list[str]) -> int:
+    dead_letter_id = _parse_dead_letter_id("retry-dead-letter", args)
+    if dead_letter_id is None:
+        return 2
+    await _retry_dead_letter(dead_letter_id)
+    return 0
+
+
+async def cmd_discard_dead_letter(args: list[str]) -> int:
+    dead_letter_id = _parse_dead_letter_id("discard-dead-letter", args)
+    if dead_letter_id is None:
+        return 2
+    await _discard_dead_letter(dead_letter_id)
+    return 0
+
+
 async def cmd_db_status(_args: list[str]) -> int:
     await _db_status()
     return 0
@@ -199,6 +336,9 @@ _REGISTRY: dict[str, AsyncCmd] = {
     "seed": cmd_seed,
     "create-user": cmd_create_user,
     "enqueue-job": cmd_enqueue_job,
+    "list-dead-letters": cmd_list_dead_letters,
+    "retry-dead-letter": cmd_retry_dead_letter,
+    "discard-dead-letter": cmd_discard_dead_letter,
     "db-status": cmd_db_status,
 }
 
@@ -214,6 +354,9 @@ def usage() -> None:
         "  python -m app.cli seed\n"
         "  python -m app.cli create-user <email> <password> [name]\n"
         "  python -m app.cli enqueue-job <kind> [payload-json]\n"
+        "  python -m app.cli list-dead-letters [limit]\n"
+        "  python -m app.cli retry-dead-letter <id>\n"
+        "  python -m app.cli discard-dead-letter <id>\n"
         "  python -m app.cli db-status\n"
     )
 

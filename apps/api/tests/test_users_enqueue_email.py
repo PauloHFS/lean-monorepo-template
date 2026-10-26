@@ -16,6 +16,10 @@ async def test_enqueue_email_returns_job_id(monkeypatch: pytest.MonkeyPatch) -> 
     async def _defer(**_kwargs: Any) -> int:
         return 42
 
+    async def _no_rate_limit(*_args: Any, **_kwargs: Any) -> int:
+        return 1
+
+    monkeypatch.setattr("app.jobs.app.check_job_rate_limit", _no_rate_limit)
     monkeypatch.setattr(send_email, "defer_async", _defer)
     payload = EnqueueEmailIn(to="a@b.com", subject="hi", body="hello")
     user = SimpleNamespace(id=uuid4())

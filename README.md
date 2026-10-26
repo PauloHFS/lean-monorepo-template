@@ -33,10 +33,11 @@ Template enxuto de monoprojeto com:
 │   │   │   │                 observability, totp, webauthn, middleware
 │   │   │   ├── db/           SQLAlchemy (base, session, models)
 │   │   │   ├── jobs/         app.py (Procrastinate) + runner.py (entrypoint) + tasks/
-│   │   │   ├── cli.py        dump-openapi, seed, create-user, enqueue-job, db-status
+│   │   │   ├── cli.py        dump-openapi, seed, create-user, enqueue-job,
+│   │   │   │                 dead-letters (list/retry/discard), db-status
 │   │   │   └── main.py       FastAPI app
 │   │   ├── migrations/       alembic (1 arquivo: 0001_initial_schema.py)
-│   │   └── tests/            pytest (123 testes)
+│   │   └── tests/            pytest (134 testes)
 │   └── web/                  React SPA (Vite)
 │       ├── e2e/              Playwright specs
 │       ├── src/
@@ -144,18 +145,49 @@ Quando algum caso *realmente* pede Redis (pub/sub com baixa latência, geofencin
 - **Heartbeat / stall recovery** automáticos — jobs travados são re-claimados pela lib.
 - **Periodic tasks** built-in (`@app.periodic(cron="*/5 * * * *")`).
 - **Schema oficial** vem direto da lib (nunca duplicar ~600 linhas de SQL); a migration 0001 aplica via `SchemaManager.apply_schema()`.
+- **Nomes padronizados**: `register_task(queue, action)` registra `name=f"{queue}.{action}"` e valida que queue/action são minúsculos, sem ponto/espaço.
+- **Retry com teto**: `register_task(..., max_retries=3)` limita as tentativas; sem teto a falha nunca vira dead letter.
+- **Rate limit por job** (`job_rate_limits`) e **DLQ** (`dead_letters`) no próprio Postgres.
 
 Pra criar uma task:
 
 ```python
 # apps/api/app/jobs/tasks/minha_task.py
-from app.jobs.app import app
+from app.jobs.app import register_task
 
-@app.task(queue="default", name="minha.coisa", retry=True)
-async def minha_task(tenant_id: str) -> None:
+
+@register_task("default", "minha-coisa")  # nome final: default.minha-coisa
+async def minha_task(ctx, tenant_id: str) -> None:
     # faça trabalho idempotente
     ...
 ```
+
+`register_task` liga a DLQ: se a task levantar exceção na **última** tentativa
+(o retry do Procrastinate já exhausted), a falha vai para `dead_letters` (com
+`kind`, payload, erro e `original_job_id`) e a exceção é relançada. Como a
+decisão de "última tentativa" é a mesma do Procrastinate, a DLQ tem uma linha
+por job que desistiu — não uma por tentativa.
+
+Enfileire com `defer_job(task, ...)`, que aplica o rate limit por janela fixa
+antes do `defer_async`:
+
+```python
+from app.jobs.app import defer_job
+
+await defer_job(
+    minha_task,
+    rate_limit_kind="default.minha-coisa",
+    rate_limit_key=f"user:{user_id}",
+    rate_limit_limit=20,
+    rate_limit_window_s=60,
+    tenant_id=tenant_id,
+)
+```
+
+As tabelas e o cleanup (pg_cron) vivem na baseline: `job_rate_limits` expira em
+1 dia; `dead_letters` resolvidas/descartadas expiram em 90 dias. Opere a DLQ por
+CLI: `python -m app.cli list-dead-letters`, `retry-dead-letter <id>` e
+`discard-dead-letter <id>`.
 
 Importe o módulo em `app/jobs/tasks/__init__.py` (uma vez, no startup). Procrastinate descobre as tasks via `import_paths=["app.jobs.tasks.email"]` em `app.py`.
 
@@ -368,7 +400,7 @@ Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, 
 - **Toolchain do front**: Node 24 com **fonte única** em `.node-version` (o mise, o Docker via build-arg e o CI via `node-version-file` leem dele; `engines` + `engine-strict` no `package.json` derrubam a install com Node antigo). Tailwind 4 é **CSS-first**: o tema vive em `@theme` no `src/index.css` e as classes do design system em `@utility` — não existe `tailwind.config.js` nem `postcss.config.js`.
 - **Segredos**: NUNCA comitar `.env`. Em prod, monte via secret manager do orquestrador.
 - **Logs**: `structlog` JSON em prod, console em dev (stderr pra não poluir stdout).
-- **Tests**: `just test` roda a suite de 123 testes. Tudo que não precisa de DB.
+- **Tests**: `just test` roda a suite de 134 testes. Tudo que não precisa de DB.
 - **E2E**: `just e2e-mock` roda só os cenários mockados (`page.route`, sem API/DB — é o que o CI roda); `just e2e` roda a suíte inteira pulando o que precisa de backend; `just e2e-full` sobe o stack e roda contra a SPA servida pela API em `:8000`.
 
 ---

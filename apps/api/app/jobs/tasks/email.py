@@ -19,10 +19,10 @@ from opentelemetry.context import Context
 
 from app.core import email as email_module
 from app.core.observability import extract_trace_context
-from app.jobs.app import app
+from app.jobs.app import register_task
 
 
-@app.task(queue="email", name="email.send", retry=True, pass_context=True)
+@register_task("email", "send")
 async def send_email(
     ctx: procrastinate.JobContext,
     to: str | list[str],

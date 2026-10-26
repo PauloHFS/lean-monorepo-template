@@ -16,9 +16,10 @@ Conteúdo (ordem de criação):
   3. sessions             (FK -> users)
   4. kv_cache             (UNLOGGED)
   5. rate_limits          (rate-limit por chave)
-  6. 2FA em users         (TOTP cols + recovery_codes + passkeys)
-  7. pg_cron jobs         (limpezas agendadas)
-  8. Procrastinate schema
+  6. jobs                 (job_rate_limits + dead_letters)
+  7. 2FA em users         (TOTP cols + recovery_codes + passkeys)
+  8. pg_cron jobs         (limpezas agendadas)
+  9. Procrastinate schema
 
 Idempotente: usa IF NOT EXISTS nos CREATE TABLE principais.
 """
@@ -55,6 +56,23 @@ _CRON_JOBS = [
         "sql": """
             DELETE FROM rate_limits
              WHERE window_start < now() - interval '1 day'
+        """,
+    },
+    {
+        "name": "cleanup-job-rate-limits",
+        "schedule": "*/15 * * * *",  # every 15min
+        "sql": """
+            DELETE FROM job_rate_limits
+             WHERE window_start < now() - interval '1 day'
+        """,
+    },
+    {
+        "name": "cleanup-dead-letters",
+        "schedule": "30 3 * * *",  # daily 03:30
+        "sql": """
+            DELETE FROM dead_letters
+             WHERE status != 'pending'
+               AND created_at < now() - interval '90 days'
         """,
     },
     {
@@ -181,7 +199,36 @@ def upgrade() -> None:
     """)
     op.execute("CREATE INDEX IF NOT EXISTS ix_rate_limits_window_start ON rate_limits (window_start);")
 
-    # ---------- 6. 2FA: TOTP + recovery codes + WebAuthn passkeys ------------
+    # ---------- 6. jobs: rate limit por kind/chave + dead-letter queue ------
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS job_rate_limits (
+            kind         TEXT NOT NULL,
+            key          TEXT NOT NULL,
+            window_start TIMESTAMPTZ NOT NULL,
+            count        INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (kind, key, window_start)
+        );
+    """)
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS dead_letters (
+            id              SERIAL PRIMARY KEY,
+            kind            TEXT NOT NULL,
+            key             TEXT NOT NULL DEFAULT '',
+            payload         JSONB NOT NULL DEFAULT '{}'::jsonb,
+            error           TEXT NOT NULL,
+            retries         INTEGER NOT NULL DEFAULT 0,
+            original_job_id INTEGER,
+            status          TEXT NOT NULL DEFAULT 'pending',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+            resolved_at     TIMESTAMPTZ
+        );
+    """)
+    op.execute("""
+        CREATE INDEX IF NOT EXISTS ix_dead_letters_status_created
+        ON dead_letters (status, created_at);
+    """)
+
+    # ---------- 7. 2FA: TOTP + recovery codes + WebAuthn passkeys ------------
     op.execute("""
         ALTER TABLE users
           ADD COLUMN IF NOT EXISTS totp_enabled     BOOLEAN NOT NULL DEFAULT FALSE,
@@ -215,7 +262,7 @@ def upgrade() -> None:
     op.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_passkeys_credential_id ON user_passkeys (credential_id);")
     op.execute("CREATE INDEX IF NOT EXISTS ix_passkeys_user ON user_passkeys (user_id);")
 
-    # ---------- 7. pg_cron jobs ---------------------------------------------
+    # ---------- 8. pg_cron jobs ---------------------------------------------
     bind = op.get_bind()
     for job in _CRON_JOBS:
         bind.execute(
@@ -227,7 +274,7 @@ def upgrade() -> None:
             },
         )
 
-    # ---------- 8. Procrastinate schema -------------------------------------
+    # ---------- 9. Procrastinate schema -------------------------------------
     # Schema oficial vem direto da lib (nunca duplicar ~600 linhas de SQL).
     _apply_procrastinate_schema()
 
@@ -254,6 +301,8 @@ def downgrade() -> None:
 
     op.execute("DROP TABLE IF EXISTS rate_limits;")
     op.execute("DROP TABLE IF EXISTS kv_cache;")
+    op.execute("DROP TABLE IF EXISTS dead_letters;")
+    op.execute("DROP TABLE IF EXISTS job_rate_limits;")
 
     op.execute("DROP TRIGGER IF EXISTS trg_users_updated_at ON users;")
     op.execute("DROP FUNCTION IF EXISTS set_updated_at();")
