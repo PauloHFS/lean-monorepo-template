@@ -189,7 +189,7 @@ As tabelas e o cleanup (pg_cron) vivem na baseline: `job_rate_limits` expira em
 CLI: `python -m app.cli list-dead-letters`, `retry-dead-letter <id>` e
 `discard-dead-letter <id>`.
 
-Importe o módulo em `app/jobs/tasks/__init__.py` (uma vez, no startup). Procrastinate descobre as tasks via `import_paths=["app.jobs.tasks.email"]` em `app.py`.
+Adicione o módulo em `app/jobs/tasks/`; o worker descobre automaticamente todos os módulos do pacote (`app.jobs.tasks.*`) sem editar `app.py`.
 
 A task `email.send` é o exemplo. Em dev → SMTP para o container `mailpit` (UI em <http://localhost:8025>). Em prod → qualquer SMTP-relay.
 

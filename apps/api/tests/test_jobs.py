@@ -233,3 +233,9 @@ async def test_defer_job_skips_rate_limit_without_config(
 
     assert await defer_job(send_email, to="a@b.com", subject="hi") == 42
     assert called is False
+
+
+def test_import_paths_auto_discovers_task_modules() -> None:
+    assert "app.jobs.tasks.email" in jobs_app.app.import_paths
+    assert all(mod.startswith("app.jobs.tasks.") for mod in jobs_app.app.import_paths)
+    assert "app.jobs.tasks.__init__" not in jobs_app.app.import_paths

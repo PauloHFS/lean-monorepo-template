@@ -8,16 +8,18 @@ Notas:
 - O worker do Procrastinate **exige um connector async** (`PsycopgConnector`);
   connectors sync (psycopg2/SQLAlchemy) servem só para deferir em contexto sync.
   Por isso usamos `PsycopgConnector` com a DSN libpq (`database_url_procrastinate`).
-- As tasks são carregadas no worker via `import_paths` (evita import circular
-  entre `app.py` e os módulos de task). Quem for deferir importa a task
-  diretamente, o que também registra o decorador.
+- As tasks são descobertas automaticamente no worker a partir do pacote
+  `app.jobs.tasks`; cada módulo `.py` dentro dele é listado em `import_paths`.
+  Quem for deferir importa a task diretamente, o que também registra o decorador.
 """
 
 from __future__ import annotations
 
 import functools
+import importlib
 import json
 import os
+import pkgutil
 import re
 import socket
 from collections.abc import Awaitable, Callable
@@ -39,7 +41,7 @@ app = procrastinate.App(
     connector=procrastinate.PsycopgConnector(
         conninfo=settings.database_url_procrastinate,
     ),
-    import_paths=["app.jobs.tasks.email"],
+    import_paths=[],
     worker_defaults={
         "concurrency": 4,
         "name": f"procrastinate-worker-{socket.gethostname()}-{os.getpid()}",
@@ -160,6 +162,33 @@ async def defer_job(
             rate_limit_window_s,
         )
     return await task.defer_async(**kwargs)
+
+
+def _discover_task_modules(package: str = "app.jobs.tasks") -> list[str]:
+    """Lista todos os módulos `.py` dentro do pacote de tasks.
+
+    A descoberta acontece no final deste módulo — depois que `register_task`
+    já foi definido — para evitar import circular com `app.jobs.tasks.*`.
+    """
+    try:
+        package_mod = importlib.import_module(package)
+    except Exception:  # noqa: BLE001 — fallback seguro se o pacote não existir
+        log.warning("não foi possível descobrir módulos de tasks", package=package)
+        return []
+
+    path = getattr(package_mod, "__path__", None)
+    if path is None:
+        return []
+
+    prefix = f"{package}."
+    return [
+        f"{prefix}{name}"
+        for _, name, is_pkg in pkgutil.iter_modules(path)
+        if not is_pkg and name != "__init__"
+    ]
+
+
+app.import_paths = _discover_task_modules()
 
 
 def get_app() -> procrastinate.App:
