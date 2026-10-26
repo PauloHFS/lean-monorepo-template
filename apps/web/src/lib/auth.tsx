@@ -11,6 +11,7 @@ import {
 import { ApiError } from '../api/client'
 import { AuthApi } from '../api/endpoints'
 import type { UserOut } from '../api/types'
+import { humanizeError } from './errors'
 
 interface AuthState {
   user: UserOut | null
@@ -21,6 +22,8 @@ interface AuthState {
 interface AuthContextValue extends AuthState {
   /** Atualiza o user no contexto (após login, logout, etc.). */
   setUser: (user: UserOut | null) => void
+  /** Reconsulta /auth/me. Usado pelo retry do guard de rota. */
+  refresh: () => Promise<void>
   /** Faz logout (limpa cookie no backend + estado local). */
   logout: () => Promise<void>
 }
@@ -37,9 +40,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState({ user, loading: false, error: null })
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
+        // Sem sessão é um estado válido, não um erro.
         setState({ user: null, loading: false, error: null })
       } else {
-        setState({ user: null, loading: false, error: (err as Error).message })
+        // Falha de transporte/5xx não é logout: mantém o erro para o guard exibir.
+        setState({ user: null, loading: false, error: humanizeError(err) })
       }
     }
   }, [])
@@ -49,7 +54,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(async () => {
-    await AuthApi.logout()
+    // A sessão local é encerrada mesmo se o backend não responder.
+    await AuthApi.logout().catch(() => undefined)
     setState({ user: null, loading: false, error: null })
   }, [])
 
@@ -58,8 +64,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   const value = useMemo<AuthContextValue>(
-    () => ({ ...state, setUser, logout }),
-    [state, setUser, logout],
+    () => ({ ...state, setUser, refresh, logout }),
+    [state, setUser, refresh, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

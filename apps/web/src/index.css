@@ -21,17 +21,21 @@ body,
   height: 100%;
 }
 
+/*
+ * Alvos de toque: min-h-12 = 48px (WCAG 2.5.5). O foco é sempre visível via
+ * :focus-visible; o outline padrão é removido só depois que o ring aparece.
+ */
 @utility btn {
-  @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition focus:outline-hidden focus:ring-2 focus:ring-offset-2;
+  @apply inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60;
 }
 @utility btn-primary {
-  @apply btn bg-brand-600 text-white hover:bg-brand-700 focus:ring-brand-500 disabled:opacity-50;
+  @apply btn bg-brand-600 text-white hover:bg-brand-700 focus-visible:ring-brand-500;
 }
 @utility btn-ghost {
-  @apply btn bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 focus:ring-brand-500;
+  @apply btn bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 focus-visible:ring-brand-500;
 }
 @utility input {
-  @apply w-full rounded-md border-slate-200 bg-white px-3 py-2 text-sm shadow-xs focus:border-brand-500 focus:ring-brand-500;
+  @apply min-h-12 w-full rounded-md border border-slate-500 bg-white px-3 py-2 text-sm shadow-xs placeholder:text-slate-500 focus:border-brand-500 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-500;
 }
 @utility card {
   @apply rounded-xl border border-slate-200 bg-white p-6 shadow-xs;

@@ -27,7 +27,7 @@ test('enqueue com sucesso exibe o job id', async ({ page }) => {
   await expect(lastJob).toContainText('queued')
 })
 
-test('enqueue com erro abre alerta nativo', async ({ page }) => {
+test('enqueue com erro mostra alerta inline em PT-BR', async ({ page }) => {
   await page.route('**/api/v1/users/enqueue-email', (route) =>
     mockJson(route, 500, { detail: 'internal error' }),
   )
@@ -35,13 +35,11 @@ test('enqueue com erro abre alerta nativo', async ({ page }) => {
   await page.goto('/dashboard')
   await expect(page.getByText(mockUser.email)).toBeVisible()
 
-  const dialogPromise = page.waitForEvent('dialog')
   await page.getByRole('button', { name: /enfileirar/i }).click()
-  const dialog = await dialogPromise
 
-  expect(dialog.message()).toContain('500')
-  expect(dialog.message()).toContain('internal error')
-  await dialog.dismiss()
+  const alert = page.getByRole('alert')
+  await expect(alert).toBeVisible()
+  await expect(alert).toContainText(/servidor falhou/i)
 
   // Sem "Último job" quando a chamada falha.
   await expect(page.getByText(/Último job:/)).toHaveCount(0)

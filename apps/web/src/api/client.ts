@@ -53,11 +53,39 @@ function safeJson(text: string): unknown {
 }
 
 function detailOf(body: unknown): string | null {
-  if (body && typeof body === 'object' && 'detail' in body) {
-    const d = (body as { detail: unknown }).detail
-    return typeof d === 'string' ? d : JSON.stringify(d)
-  }
+  if (!body || typeof body !== 'object' || !('detail' in body)) return null
+  const detail = (body as { detail: unknown }).detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) return validationDetail(detail)
   return null
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  email: 'e-mail',
+  password: 'senha',
+  code: 'código',
+  pending_token: 'sessão',
+  full_name: 'nome',
+  to: 'destinatário',
+  subject: 'assunto',
+  body: 'corpo',
+  credential: 'credencial',
+}
+
+/** 422 do FastAPI vira texto legível em vez de um array JSON cru na tela. */
+function validationDetail(entries: unknown[]): string {
+  const fields = new Set<string>()
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || !('loc' in entry)) continue
+    const loc = (entry as { loc: unknown }).loc
+    if (!Array.isArray(loc)) continue
+    const field = loc.at(-1)
+    if (typeof field === 'string' && field !== 'body' && field !== 'query' && field !== 'path') {
+      fields.add(FIELD_LABELS[field] ?? field)
+    }
+  }
+  if (fields.size === 0) return 'Dados inválidos.'
+  return `Dados inválidos: ${[...fields].join(', ')}.`
 }
 
 export const api = {

@@ -20,7 +20,9 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // Sem sourcemap no build: a API serve dist/assets publicamente, então o
+    // .map entregaria o código-fonte TypeScript completo.
+    sourcemap: false,
     target: 'es2022',
   },
 })

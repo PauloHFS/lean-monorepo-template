@@ -6,9 +6,11 @@ import { ApiError } from '../api/client'
 import { TwoFactorApi } from '../api/endpoints'
 import type { PasskeyRegisterIn } from '../api/types'
 import { bytesToBase64Url } from '../lib/base64'
+import { humanizeError } from '../lib/errors'
 import { toRegistrationOptions } from '../lib/webauthn'
 
-type Stage = 'idle' | 'scanning' | 'confirming' | 'enabled'
+type Stage = 'idle' | 'scanning' | 'enabled'
+type CopyStatus = 'idle' | 'copied' | 'failed'
 
 /**
  * Página de Segurança: setup TOTP + registro de passkey.
@@ -28,10 +30,14 @@ export function Security() {
   const [code, setCode] = useState('')
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle')
+  const [savedCodes, setSavedCodes] = useState(false)
 
   async function startTotp() {
     setError(null)
+    setSuccess(null)
     setBusy(true)
     try {
       const { secret: s, otpauth_uri } = await TwoFactorApi.totpSetup()
@@ -48,25 +54,36 @@ export function Security() {
 
   async function confirmTotp(e: FormEvent) {
     e.preventDefault()
+    if (busy) return
     setError(null)
+    setSuccess(null)
     setBusy(true)
     try {
       const out = await TwoFactorApi.totpConfirm(code)
-      if (out.enabled) {
-        setRecoveryCodes(out.recovery_codes)
-        setStage('enabled')
-      } else {
-        setError('código inválido')
+      if (!out.enabled) {
+        setError('Código inválido ou expirado.')
+        return
       }
+      setRecoveryCodes(out.recovery_codes)
+      setCopyStatus('idle')
+      setSavedCodes(false)
+      setStage('enabled')
+      setSuccess('2FA ativado. Guarde os códigos de recuperação abaixo.')
     } catch (err) {
-      setError(humanizeError(err))
+      if (err instanceof ApiError && [400, 401, 422].includes(err.status)) {
+        setError('Código inválido ou expirado.')
+      } else {
+        setError(humanizeError(err))
+      }
     } finally {
       setBusy(false)
     }
   }
 
   async function registerPasskey() {
+    if (busy) return
     setError(null)
+    setSuccess(null)
     setBusy(true)
     try {
       const { options, challenge } = await TwoFactorApi.passkeyRegisterOptions()
@@ -77,13 +94,13 @@ export function Security() {
       })
 
       if (!(credential instanceof PublicKeyCredential)) {
-        setError('registro cancelado')
+        setError('Registro cancelado.')
         return
       }
 
       const resp = credential.response
       if (!(resp instanceof AuthenticatorAttestationResponse)) {
-        setError('resposta inesperada do autenticador')
+        setError('Resposta inesperada do autenticador.')
         return
       }
 
@@ -101,31 +118,66 @@ export function Security() {
         },
       }
       await TwoFactorApi.passkeyRegisterVerify(payload)
-      setError('passkey registrada!')
+      setSuccess('Passkey registrada. Use-a como segundo fator no próximo login.')
     } catch (err) {
-      setError(humanizeError(err))
+      if (err instanceof DOMException && err.name === 'NotAllowedError') {
+        setError('Registro cancelado pelo usuário.')
+      } else {
+        setError(humanizeError(err, 'Não foi possível registrar a passkey.'))
+      }
     } finally {
       setBusy(false)
     }
   }
 
+  async function copyRecoveryCodes() {
+    try {
+      await navigator.clipboard.writeText(recoveryCodes.join('\n'))
+      setCopyStatus('copied')
+    } catch {
+      setCopyStatus('failed')
+    }
+  }
+
+  function downloadRecoveryCodes() {
+    const content = [
+      'Códigos de recuperação — Lean Monorepo',
+      '',
+      ...recoveryCodes,
+      '',
+      'Cada código serve uma única vez.',
+    ].join('\n')
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'codigos-de-recuperacao.txt'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
-    <main className="mx-auto max-w-2xl p-6 space-y-8">
+    <main className="mx-auto max-w-2xl space-y-8 p-4 sm:p-6">
       <header>
-        <h1 className="text-2xl font-semibold">Segurança</h1>
+        <h1 className="text-xl font-semibold sm:text-2xl">Segurança</h1>
         <p className="text-sm text-slate-500">Adicione uma segunda camada além da senha.</p>
       </header>
 
       <section className="card space-y-4">
-        <header className="flex items-center justify-between">
+        <header className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-semibold">Autenticador (TOTP)</h2>
           {stage === 'enabled' && (
-            <span className="text-xs text-green-600 font-medium">Ativado ✓</span>
+            <span className="text-sm font-medium text-green-700">Ativado ✓</span>
           )}
         </header>
 
         {stage === 'idle' && (
-          <button type="button" onClick={startTotp} disabled={busy} className="btn-primary">
+          <button
+            type="button"
+            onClick={() => void startTotp()}
+            disabled={busy}
+            className="btn-primary w-full sm:w-auto"
+          >
             {busy ? 'Gerando…' : 'Configurar TOTP'}
           </button>
         )}
@@ -136,27 +188,51 @@ export function Security() {
               Escaneie o QR no app (Google Authenticator, 1Password, etc).
             </p>
             <div className="flex flex-col items-center gap-3">
-              {qrDataUrl && <img src={qrDataUrl} alt="QR TOTP" className="rounded border" />}
-              <details className="text-xs text-slate-500 w-full">
-                <summary className="cursor-pointer">
+              {qrDataUrl && (
+                <img
+                  src={qrDataUrl}
+                  alt="QR code para configurar o autenticador"
+                  width={240}
+                  height={240}
+                  className="h-auto w-full max-w-[240px] rounded border"
+                />
+              )}
+              <details className="w-full text-xs text-slate-500">
+                <summary className="min-h-12 cursor-pointer py-3">
                   Não consegue escanear? Digite manualmente.
                 </summary>
-                <code className="block mt-2 p-2 bg-slate-100 rounded break-all">{secret}</code>
+                <code className="mt-2 block break-all rounded bg-slate-100 p-2">{secret}</code>
               </details>
             </div>
-            <form onSubmit={confirmTotp} className="flex gap-2">
-              <input
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]{6}"
-                maxLength={6}
-                placeholder="123456"
-                required
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                className="input"
-              />
-              <button type="submit" disabled={busy || code.length !== 6} className="btn-primary">
+            <form onSubmit={confirmTotp} className="flex flex-col gap-2 sm:flex-row">
+              <div className="space-y-1 sm:flex-1">
+                <label htmlFor="totp-code" className="block text-sm text-slate-700">
+                  Código de verificação
+                </label>
+                <input
+                  id="totp-code"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  autoComplete="one-time-code"
+                  placeholder="123456"
+                  required
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  aria-invalid={error !== null}
+                  aria-describedby={error ? 'totp-code-hint page-error' : 'totp-code-hint'}
+                  className="input"
+                />
+                <p id="totp-code-hint" className="text-xs text-slate-500">
+                  Digite o código de 6 dígitos gerado pelo app.
+                </p>
+              </div>
+              <button
+                type="submit"
+                disabled={busy || code.length !== 6}
+                className="btn-primary self-end sm:self-auto"
+              >
                 Ativar
               </button>
             </form>
@@ -166,23 +242,57 @@ export function Security() {
         {stage === 'enabled' && (
           <div className="space-y-3">
             <p className="text-sm text-slate-600">
-              2FA ativo. Guarde estes códigos de recuperação em local seguro. Cada um serve uma
-              única vez.
+              Estes códigos serão exibidos apenas uma vez. Baixe ou copie antes de sair desta
+              página. Cada um serve uma única vez.
             </p>
-            <pre className="bg-slate-100 rounded p-3 text-xs font-mono grid grid-cols-2 gap-1">
+            <p className="text-sm font-medium">Seus códigos de recuperação</p>
+            <pre className="grid grid-cols-1 gap-1 rounded bg-slate-100 p-3 font-mono text-xs sm:grid-cols-2">
               {recoveryCodes.map((c) => (
-                <code key={c}>{c}</code>
+                <code key={c} className="break-all">
+                  {c}
+                </code>
               ))}
             </pre>
-            <button
-              type="button"
-              onClick={() => {
-                navigator.clipboard.writeText(recoveryCodes.join('\n'))
-              }}
-              className="btn-ghost text-xs"
-            >
-              Copiar
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => void copyRecoveryCodes()}
+                className="btn-ghost w-full sm:w-auto"
+              >
+                Copiar códigos
+              </button>
+              <button
+                type="button"
+                onClick={downloadRecoveryCodes}
+                className="btn-ghost w-full sm:w-auto"
+              >
+                Baixar .txt
+              </button>
+            </div>
+            {copyStatus === 'copied' && (
+              <p role="status" className="text-sm text-green-700">
+                Códigos copiados.
+              </p>
+            )}
+            {copyStatus === 'failed' && (
+              <p role="alert" className="text-sm text-red-600">
+                Não foi possível copiar. Use “Baixar .txt”.
+              </p>
+            )}
+            <label className="flex min-h-12 items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={savedCodes}
+                onChange={(e) => setSavedCodes(e.target.checked)}
+                className="h-5 w-5 rounded border-slate-300"
+              />
+              <span>Salvei os códigos em um local seguro.</span>
+            </label>
+            {savedCodes && (
+              <p role="status" className="text-sm text-green-700">
+                Tudo certo. Você pode fechar esta página.
+              </p>
+            )}
           </div>
         )}
       </section>
@@ -194,21 +304,26 @@ export function Security() {
             Use sua digital, face ou chave física. Sem código pra digitar.
           </p>
         </header>
-        <button type="button" onClick={registerPasskey} disabled={busy} className="btn-primary">
+        <button
+          type="button"
+          onClick={() => void registerPasskey()}
+          disabled={busy}
+          className="btn-primary w-full sm:w-auto"
+        >
           {busy ? 'Aguardando autenticador…' : 'Registrar passkey'}
         </button>
       </section>
 
+      {success && (
+        <p role="status" className="text-sm text-green-700">
+          {success}
+        </p>
+      )}
       {error && (
-        <p role="alert" className="text-sm text-red-600">
+        <p id="page-error" role="alert" className="text-sm text-red-600">
           {error}
         </p>
       )}
     </main>
   )
-}
-
-function humanizeError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.status} — ${err.message}`
-  return (err as Error).message ?? 'erro desconhecido'
 }

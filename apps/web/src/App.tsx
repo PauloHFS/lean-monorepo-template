@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router'
 
+import { RequireAuth } from './components/RequireAuth'
 import { AuthProvider } from './lib/auth'
 import { Dashboard } from './pages/Dashboard'
 import { Login } from './pages/Login'
@@ -12,8 +13,10 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/security" element={<Security />} />
+        <Route element={<RequireAuth />}>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/security" element={<Security />} />
+        </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AuthProvider>

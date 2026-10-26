@@ -1,12 +1,16 @@
 import { expect, test } from '@playwright/test'
 
-import { backendAvailable } from './helpers'
+import { backendAvailable, mockUnauthenticated } from './helpers'
 
 /**
  * Smoke: a UI carrega e links básicos funcionam.
  * O healthz só roda com backend real no ar; sem stack, skipa em vez de falhar.
  */
 test('app carrega e o formulário de login aparece', async ({ page }) => {
+  // Sem backend no CI: mocka 401 para exercitar o caminho "deslogado"
+  // (falha de transporte agora vira tela de erro, não logout).
+  await mockUnauthenticated(page)
+
   // 1. UI: home redireciona pra /dashboard, que manda pra /login (não autenticado)
   await page.goto('/')
   await expect(page).toHaveURL(/\/login$/)
@@ -30,6 +34,7 @@ test('healthz responde', async ({ request }) => {
 })
 
 test('404 renderiza a página NotFound', async ({ page }) => {
+  await mockUnauthenticated(page)
   await page.goto('/rota-que-nao-existe')
 
   // App.tsx: rota "*" renderiza <NotFound>, sem redirect.
