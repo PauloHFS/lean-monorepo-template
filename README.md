@@ -320,6 +320,25 @@ O repo **não embute proxy**: a app sobe HTTP puro e o TLS termina no proxy do C
    - `${VAR:?}` é interpolado globalmente (ver `GRAFANA_ADMIN_PASSWORD` acima).
 7. **Sem Coolify**: ponha um proxy próprio (Caddy/nginx) no host terminando TLS em `127.0.0.1:${API_PORT}`. API e Postgres já publicam só em loopback; use `FORWARDED_ALLOW_IPS=127.0.0.1`.
 
+### Trocar para Postgres gerenciado (Neon/RDS/Cloud SQL)
+
+**Quando trocar** — por métrica sustentada por dias, não por feeling: disco do Postgres acima de 70%, RAM do Postgres competindo com a app (pressão de OOM), `pg_stat_activity` saturando o pool, ou o backup parando a VPS. Antes disso, 1 VPS (4 vCPU/8 GB) com Postgres local cobre bem: a API é stateless (a sessão é uma linha em `sessions`; o cookie é só o token opaco), então escala horizontal sem sticky session — o primeiro gargalo é disco/RAM do Postgres na mesma caixa, não a API.
+
+**Como trocar**:
+
+1. Crie o Postgres gerenciado e guarde host, porta, banco, usuário e senha.
+2. No resource da Coolify (ou no `.env` local), defina `DATABASE_URL` com o esquema `postgresql+asyncpg://`, usuário/senha e `?sslmode=require`. Esse é o único caminho que cobre os **três** consumidores: o `apply_sslmode`, que anexa/sobrescreve `DB_SSLMODE` na DSN, só roda no **engine da API** — o **Alembic** (`migrations/env.py`) e o **Procrastinate/worker** usam a DSN **sem** `sslmode`. O esquema importa: sem `+asyncpg`, o `create_async_engine` recebe um driver síncrono e falha. `DATABASE_URL` tem precedência sobre os `POSTGRES_*`.
+3. **Edite o `docker-compose.yml` do projeto** (não o template): remova o serviço `postgres`, a entrada `postgres` do `depends_on` (`condition: service_healthy`) de `migrate`, `api` e `worker`, e o `POSTGRES_HOST: postgres` do `environment:` dos três — o `environment:` vence o `env_file`. Sem isso o app continua apontando para o banco do compose.
+4. O `migrate` continua one-shot: roda `alembic upgrade head` contra o banco externo antes de `api`/`worker` (`service_completed_successfully`).
+5. O `worker` deve usar o **endpoint direto**, não o pooler/PgBouncer: o Procrastinate mantém conexão persistente e o pooler em transaction mode quebra o worker.
+6. Confirme que o schema subiu: `alembic_version` existe no banco externo e `/api/v1/healthz` responde `db=true`.
+
+**O que muda e o que não muda**: é o mesmo código — o `DATABASE_URL` já tem precedência sobre `POSTGRES_*`. O `docker-compose.yml` **do repo continua com o `postgres`**, porque é isso que o CI prova (o job `docker` boota a stack com `db=true`) e o que o e2e local usa; a mudança é no deploy do projeto, não no template. Fila, sessão, cache e rate limit continuam no mesmo banco (AD-001), então **não** há Redis.
+
+**Extensões**: `citext` é obrigatória e a migration a cria (se o provedor exigir, habilite antes). `pg_cron` é opcional — a baseline tolera a falta e você perde só o cleanup agendado de `rate_limits`/`dead_letters`, que passa a ser tarefa do operador. As 9 extensões de `scripts/postgres-init/01-extensions.sql` são affordance do template (o init do container não roda num PG gerenciado) e **nada no app as usa hoje**: se o projeto precisar de geo ou embeddings, provisione a extensão no provedor.
+
+**Backup/restore**: com o banco gerenciado o backup é do provedor (RDS tem PITR; no Neon, confirme a retenção do branching) e o backup de volume do Coolify deixa de se aplicar (não há volume). **A Coolify não tem PITR**; se o provedor escolhido também não tiver, o dump lógico do repo — `scripts/backup.sh` (`pg_dump -Fc` + sanidade `pg_restore --list`) e `just test-restore` — continua sendo o caminho de restore confiável. Atenção: `scripts/backup.sh`/`restore.sh`/`test-restore.sh` **não leem `DATABASE_URL` nem `DB_SSLMODE`** — só `POSTGRES_HOST/PORT/DB/USER/PASSWORD`; contra um Postgres gerenciado preencha os `POSTGRES_*` e exporte `PGSSLMODE=require` (o `libpq` respeita) ou ajuste os scripts.
+
 ### Backup do banco no R2
 
 No nosso modelo (compose), o Postgres **não** é um database resource da Coolify: ele aparece como **persistent storage** da application (`pgdata`). Por isso o backup nativo da Coolify para ele é o **backup de volume** — um `tar.gz` do data dir, enviado ao S3/R2.

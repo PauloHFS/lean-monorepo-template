@@ -33,6 +33,18 @@ services:
       timeout: 3s
       retries: 10
 
+  # ---- Postgres gerenciado (Neon/RDS/Cloud SQL) ---------------------------
+  # Para trocar por um Postgres externo, edite este arquivo:
+  #   1. remova o serviço `postgres` inteiro (as linhas acima);
+  #   2. remova `depends_on: postgres` (`condition: service_healthy`) de
+  #      `migrate`, `api` e `worker` — condicional não existe no compose;
+  #   3. remova `POSTGRES_HOST: postgres` do `environment:` dos três (ele
+  #      vence o `env_file`) e defina `DATABASE_URL` + `DB_SSLMODE=require`.
+  # Só `citext` é exigida (a migration cria). As extensões de
+  # `scripts/postgres-init` (postgis/vector/ltree/...) não existem num PG
+  # gerenciado e nada no app as usa hoje. Passo a passo: README,
+  # "Trocar para Postgres gerenciado".
+
   # ---- Mailpit: SMTP server com web UI para dev/test ----------------------
   # Captura emails enviados pelo SmtpProvider. Ver em http://localhost:8025
   # Perfil `dev`: isolado do stack core; só sobe quando pedido explicitamente
