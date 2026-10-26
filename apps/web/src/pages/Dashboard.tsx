@@ -87,8 +87,8 @@ export function Dashboard() {
       <section className="card space-y-3">
         <h2 className="text-base font-semibold">Disparar job no Postgres</h2>
         <p className="text-sm text-slate-500">
-          Enfileira um <code>email.send</code> na tabela <code>background_jobs</code>. O worker pega
-          via <code>SELECT … FOR UPDATE SKIP LOCKED</code>.
+          Enfileira um <code>email.send</code> na fila do Procrastinate (Postgres). O worker
+          reivindica o job com <code>SELECT … FOR UPDATE SKIP LOCKED</code>.
         </p>
         <button type="button" onClick={handleEnqueue} disabled={enqueueing} className="btn-primary">
           {enqueueing ? 'Enfileirando…' : 'Enfileirar e-mail'}

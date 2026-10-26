@@ -33,10 +33,10 @@ Template enxuto de monoprojeto com:
 │   │   │   │                 observability, totp, webauthn, middleware
 │   │   │   ├── db/           SQLAlchemy (base, session, models)
 │   │   │   ├── jobs/         app.py (Procrastinate) + runner.py (entrypoint) + tasks/
-│   │   │   ├── cli.py        dump-openapi, seed, create-user, enqueue-job, example-job, db-status
+│   │   │   ├── cli.py        dump-openapi, seed, create-user, enqueue-job, db-status
 │   │   │   └── main.py       FastAPI app
 │   │   ├── migrations/       alembic (1 arquivo: 0001_initial_schema.py)
-│   │   └── tests/            pytest (130 testes)
+│   │   └── tests/            pytest (123 testes)
 │   └── web/                  React SPA (Vite)
 │       ├── e2e/              Playwright specs
 │       ├── src/
@@ -143,7 +143,6 @@ Quando algum caso *realmente* pede Redis (pub/sub com baixa latência, geofencin
 - **Async nativo** (psycopg3) — não bloqueia o event loop.
 - **Heartbeat / stall recovery** automáticos — jobs travados são re-claimados pela lib.
 - **Periodic tasks** built-in (`@app.periodic(cron="*/5 * * * *")`).
-- **DLQ opcional** (`dead_letters`) — tarefas que falharam após `max_attempts`.
 - **Schema oficial** vem direto da lib (nunca duplicar ~600 linhas de SQL); a migration 0001 aplica via `SchemaManager.apply_schema()`.
 
 Pra criar uma task:
@@ -369,7 +368,7 @@ Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, 
 - **Toolchain do front**: Node 24 com **fonte única** em `.node-version` (o mise, o Docker via build-arg e o CI via `node-version-file` leem dele; `engines` + `engine-strict` no `package.json` derrubam a install com Node antigo). Tailwind 4 é **CSS-first**: o tema vive em `@theme` no `src/index.css` e as classes do design system em `@utility` — não existe `tailwind.config.js` nem `postcss.config.js`.
 - **Segredos**: NUNCA comitar `.env`. Em prod, monte via secret manager do orquestrador.
 - **Logs**: `structlog` JSON em prod, console em dev (stderr pra não poluir stdout).
-- **Tests**: `just test` roda a suite de 130 testes. Tudo que não precisa de DB.
+- **Tests**: `just test` roda a suite de 123 testes. Tudo que não precisa de DB.
 - **E2E**: `just e2e-mock` roda só os cenários mockados (`page.route`, sem API/DB — é o que o CI roda); `just e2e` roda a suíte inteira pulando o que precisa de backend; `just e2e-full` sobe o stack e roda contra a SPA servida pela API em `:8000`.
 
 ---

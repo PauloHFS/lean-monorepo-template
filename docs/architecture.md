@@ -19,8 +19,8 @@ pgcrypto, uuid-ossp, citext) as the single source of truth for everything except
 
 **Consequences**:
 - One connection pool, one backup, one set of credentials.
-- `background_jobs` table replaces Celery/Redis; `SELECT … FOR UPDATE SKIP LOCKED` scales
-  horizontally and is ACID with the rest of the app.
+- Fila (Procrastinate) no próprio Postgres: jobs são reivindicados com
+  `SELECT … FOR UPDATE SKIP LOCKED`, ACID com o resto do app.
 - Sessions are server-side rows (`sessions.token_hash` + `sha256(token)` in cookie) — instant
   revocation, no JWT blocklist dance.
 - `kv_cache` is `UNLOGGED` + TTL for ephemeral cache.
@@ -34,13 +34,13 @@ pgcrypto, uuid-ossp, citext) as the single source of truth for everything except
 **Status**: current.
 
 **Context**: We need a job queue. Options: Celery (Redis/RabbitMQ broker), RQ, Dramatiq,
-arq, a hand-rolled `background_jobs` + `SKIP LOCKED` runner, or **Procrastinate** (Postgres-only,
+arq, a hand-rolled `SKIP LOCKED` runner, or **Procrastinate** (Postgres-only,
 async-native, lib maintained by PeopleDoc/UKG).
 
-We previously ran the hand-rolled `background_jobs` table + `SELECT … FOR UPDATE SKIP LOCKED`
-+ visibility-timeout recovery + exponential backoff. It worked, but reinventing the wheel
-came with ongoing maintenance (heartbeat, stall detection, periodic tasks, DLQ, retry
-strategies — each implemented and tested by hand).
+The template previously shipped that hand-rolled runner plus its table, visibility-timeout
+recovery and exponential backoff. It worked, but reinventing the wheel came with ongoing
+maintenance (heartbeat, stall detection, periodic tasks, DLQ, retry strategies — each
+implemented and tested by hand). The scaffolding was removed from the baseline (AD-018).
 
 **Decision**: Use **Procrastinate 3.10.0** as the queue. Schema is applied verbatim from the
 lib via `SchemaManager.apply_schema()` in the migration — no duplication.
@@ -441,9 +441,8 @@ morriam no container) e a resposta não trazia identificador de trace.
 - Sampling e roteamento de vendor continuam sendo decisão do operador (env vars);
   o app permanece vendor-agnostic (AD-011).
 - Sem `OTEL_EXPORTER_OTLP_ENDPOINT`, o custo é praticamente zero.
-- known gap: o endpoint grava em `background_jobs`, mas o worker Procrastinate consome
-  a fila própria dele — a ponte entre as duas tabelas é pré-existente e segue fora do
-  escopo. O payload já carrega `trace_context`, pronto para a ligação.
+- O endpoint e o worker usam a mesma fila (Procrastinate): o `trace_context` do payload
+  liga o span `email.enqueue` ao span `email.send`.
 
 ---
 
@@ -502,9 +501,9 @@ TypeScript e o front seguia consumindo um contrato inexistente. Em quatro rotas 
 acontecia de fato (`POST /auth/login`, `/2fa/verify`, `/passkey/login/verify` e os
 options/credentials de passkey). O front ainda redeclarava esses shapes à mão e
 castava a resposta (`response as UserOut`), o que zerava `user.email` em runtime.
-Em paralelo, `POST /users/enqueue-email` gravava na tabela `background_jobs`, que é
-**legada e não é consumida por ninguém** — o worker Procrastinate lê a fila própria,
-então o e-mail nunca era enviado.
+Em paralelo, `POST /users/enqueue-email` gravava numa tabela de fila legada que
+ninguém consumia — o worker Procrastinate lê a fila própria, então o e-mail nunca
+era enviado.
 
 **Decision**:
 - Toda resposta de rota declara um **modelo Pydantic explícito**; `dict[str, Any]`
@@ -517,7 +516,9 @@ então o e-mail nunca era enviado.
   tipos manuais de resposta saem.
 - `POST /users/enqueue-email` passa a chamar `send_email.defer_async(...)` — a mesma
   task do worker e do CLI — e `job_id` vira o id do Procrastinate (inteiro).
-  `background_jobs` deixa de receber enfileiramentos.
+- A tabela legada de fila, as tabelas de DLQ/rate-limit por kind e o modelo
+  `BackgroundJob` foram **removidos do template** (baseline migration e código):
+  a única fila é a do Procrastinate.
 
 **Consequences**:
 - `schema.d.ts` regenerado (`+168/−15`) e o contrato do login/verify passa a ter
@@ -525,9 +526,7 @@ então o e-mail nunca era enviado.
 - As options WebAuthn são JSON base64url: o front precisa convertê-las para
   `BufferSource` (`src/lib/webauthn.ts`) — o `navigator.credentials` exige bytes e
   o fluxo de passkey estava quebrado no browser.
-- O `job_id` muda de `string` para `number` no TypeScript (quebra compatível: o
-  front só exibe o valor).
-- `background_jobs` continua no schema (não há migration) mas fica inerte.
+- O `job_id` é `number` no TypeScript (id do Procrastinate); o front só exibe o valor.
 
 ---
 

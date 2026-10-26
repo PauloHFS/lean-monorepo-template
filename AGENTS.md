@@ -83,7 +83,6 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 ### Filas e jobs
 
 - Jobs entram pela fila do Procrastinate (`send_email.defer_async(...)`), a mesma task que o worker executa. O `trace_context` viaja no payload (`inject_trace_context`).
-- A tabela `background_jobs` é legada e **ninguém consome**: não grave enfileiramentos de produção nela. O comando `python -m app.cli example-job` insere uma linha-template (`kind='example.task'`) para um consumidor futuro — é referência de formato, não fila.
 - `job_id` é o id do Procrastinate (inteiro), não um UUID.
 
 ### Testes

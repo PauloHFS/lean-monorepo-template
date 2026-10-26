@@ -20,19 +20,17 @@ Conteúdo (ordem de criação):
   1. Extensões            (citext)
   2. users                (com trigger updated_at)
   3. sessions             (FK -> users)
-  4. background_jobs      (legado; mantido para rollback)
-  5. kv_cache             (UNLOGGED)
-  6. rate_limits          (rate-limit por chave)
-  7. 2FA em users         (TOTP cols + recovery_codes + passkeys)
-  8. pg_cron jobs         (limpezas agendadas)
-  9. Procrastinate schema + dead_letters + job_rate_limits
+  4. kv_cache             (UNLOGGED)
+  5. rate_limits          (rate-limit por chave)
+  6. 2FA em users         (TOTP cols + recovery_codes + passkeys)
+  7. pg_cron jobs         (limpezas agendadas)
+  8. Procrastinate schema
 
 Idempotente: usa IF NOT EXISTS nos CREATE TABLE principais.
 """
 from typing import Sequence, Union
 
 from sqlalchemy import text
-from sqlalchemy.dialects import postgresql
 
 import sqlalchemy as sa
 from alembic import op
@@ -132,7 +130,7 @@ def upgrade() -> None:
         if_not_exists=True,
     )
 
-    # ---------- updated_at trigger (criado cedo p/ atender users/background_jobs)
+    # ---------- updated_at trigger
     op.execute("""
         CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
         BEGIN
@@ -158,43 +156,6 @@ def upgrade() -> None:
     """)
     op.create_index("ix_sessions_user_id", "sessions", ["user_id"], if_not_exists=True)
     op.create_index("ix_sessions_expires_at", "sessions", ["expires_at"], if_not_exists=True)
-
-    # ---------- 4. background_jobs (fila Postgres-first) ---------------------
-    # Legado: mantido para rollback/auditoria. O runner ativo é Procrastinate.
-    op.execute("""
-        CREATE TABLE IF NOT EXISTS background_jobs (
-            id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            queue         TEXT NOT NULL DEFAULT 'default',
-            kind          TEXT NOT NULL,
-            payload       JSONB NOT NULL DEFAULT '{}'::jsonb,
-            status        TEXT NOT NULL DEFAULT 'pending',
-            attempts      INTEGER NOT NULL DEFAULT 0,
-            max_attempts  INTEGER NOT NULL DEFAULT 5,
-            run_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-            locked_at     TIMESTAMPTZ,
-            locked_by     TEXT,
-            started_at    TIMESTAMPTZ,
-            finished_at   TIMESTAMPTZ,
-            last_error    TEXT,
-            created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-    """)
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS ix_jobs_ready
-        ON background_jobs (queue, status, run_at)
-        WHERE status IN ('pending', 'failed')
-              AND attempts < max_attempts;
-    """)
-    op.create_index("ix_jobs_kind", "background_jobs", ["kind"], if_not_exists=True)
-
-    for tbl in ("users", "background_jobs"):
-        op.execute(f"""
-            DROP TRIGGER IF EXISTS trg_{tbl}_updated_at ON {tbl};
-            CREATE TRIGGER trg_{tbl}_updated_at
-            BEFORE UPDATE ON {tbl}
-            FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-        """)
 
     # ---------- 5. kv_cache (UNLOGGED) ---------------------------------------
     # UNLOGGED: super rápido, mas não replicado/recuperável — exatamente o que
@@ -266,43 +227,15 @@ def upgrade() -> None:
             },
         )
 
-    # ---------- 9. Procrastinate + DLQ + rate-limit por kind ----------------
+    # ---------- 9. Procrastinate schema -------------------------------------
     # Schema oficial vem direto da lib (nunca duplicar ~600 linhas de SQL).
     _apply_procrastinate_schema()
-
-    op.create_table(
-        "dead_letters",
-        sa.Column("id", sa.BigInteger, primary_key=True),
-        sa.Column("job_id", sa.BigInteger, nullable=True),
-        sa.Column("kind", sa.String(64), nullable=False),
-        sa.Column("queue", sa.String(64), nullable=False),
-        sa.Column("payload", postgresql.JSONB, nullable=False),
-        sa.Column("attempts", sa.Integer, nullable=False),
-        sa.Column("last_error", sa.Text, nullable=True),
-        sa.Column(
-            "failed_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.func.now(),
-            nullable=False,
-        ),
-    )
-    op.create_index("ix_dead_letters_failed_at", "dead_letters", ["failed_at"])
-    op.create_index("ix_dead_letters_kind", "dead_letters", ["kind"])
-
-    op.create_table(
-        "job_rate_limits",
-        sa.Column("kind", sa.String(64), primary_key=True),
-        sa.Column("max_per_minute", sa.Integer, nullable=False),
-        sa.Column("burst", sa.Integer, server_default="5", nullable=False),
-    )
 
 
 # =============================================================================
 # DOWN
 # =============================================================================
 def downgrade() -> None:
-    op.drop_table("job_rate_limits")
-    op.drop_table("dead_letters")
     # As tabelas procrastinate_* são geridas pela lib; não as dropamos aqui.
     # Um downgrade que precise removê-las deve fazê-lo à parte.
 
@@ -322,10 +255,8 @@ def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS rate_limits;")
     op.execute("DROP TABLE IF EXISTS kv_cache;")
 
-    for tbl in ("background_jobs", "users"):
-        op.execute(f"DROP TRIGGER IF EXISTS trg_{tbl}_updated_at ON {tbl};")
+    op.execute("DROP TRIGGER IF EXISTS trg_users_updated_at ON users;")
     op.execute("DROP FUNCTION IF EXISTS set_updated_at();")
 
-    op.execute("DROP TABLE IF EXISTS background_jobs;")
     op.execute("DROP TABLE IF EXISTS sessions;")
     op.execute("DROP TABLE IF EXISTS users;")
