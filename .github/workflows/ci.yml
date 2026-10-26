@@ -137,7 +137,8 @@ jobs:
   e2e:
     name: e2e (playwright, cenario mockado)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Teto do job = soma dos tetos dos steps (install 10 + e2e 5) + setup.
+    timeout-minutes: 20
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     defaults:
@@ -155,10 +156,43 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
 
       - run: npm ci
+
+      # O install do Chromium travou 15 min 1x em 2 runs (CDN/apt do runner).
+      # Cache dos browsers (pula o download) + teto por tentativa + 3 tentativas.
+      - name: Restore cache dos browsers do Playwright
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('apps/web/package-lock.json') }}
+
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 10
+        env:
+          PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: "120000"
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if timeout --kill-after=15s 3m npx playwright install --with-deps chromium; then
+              exit 0
+            fi
+            echo "::warning::install do Chromium falhou (tentativa ${attempt}/3); repetindo"
+            sleep $((attempt * 10))
+          done
+          echo "::error::nao foi possivel instalar o Chromium"
+          exit 1
+
+      # Salva assim que o browser esta no disco, mesmo se o teste falhar depois:
+      # o download e a parte cara e instavel, o teste e o gate.
+      - name: Cache dos browsers do Playwright
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('apps/web/package-lock.json') }}
+
       # Só os specs que rodam sem API/DB (mock de rede via page.route).
       - name: E2E mockados
+        timeout-minutes: 5
         run: npm run e2e -- e2e/smoke.spec.ts e2e/auth-failure.spec.ts e2e/async-flow.spec.ts
 
   schema-sync:

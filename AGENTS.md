@@ -162,6 +162,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 ### CI e supply chain
 
 - As actions do CI/deploy são pinadas por **commit SHA** (com a versão em comentário); não troque por tag flutuante.
+- O job `e2e` é endurecido contra o travamento do download do Chromium (1x em 2 runs, CDN/apt do runner): cache dos browsers (`actions/cache`, `~/.cache/ms-playwright`), teto por tentativa (`timeout` + 3 tentativas) e `timeout-minutes` por step. O cache é salvo logo após o install, então o download caro não se repete quando o teste falha.
 - Dependabot (`.github/dependabot.yml`) abre PRs semanais para `pip`, `npm`, `github-actions` e `docker`; as instrumentações OTel sobem agrupadas.
 - O gate de auditoria do front no CI é `npm audit --omit=dev --audit-level=moderate` (local: `just web-audit`, `--audit-level=high`).
 - `just ci` roda `just validate-compose`, que materializa um `.env` a partir do `.env.example` se não houver um e usa `GRAFANA_ADMIN_PASSWORD=validation-only` quando a variável está ausente/vazia: **não** é preciso passá-la na invocação. A interpolação do Compose é global, então o valor de validação existe justamente para o gate passar sem a senha real, que só é exigida ao subir o stack de observability de verdade.
