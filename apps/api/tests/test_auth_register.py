@@ -9,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
+from app.api.v1.endpoints import auth as auth_endpoints
 from app.api.v1.endpoints.auth import RegisterIn, register
 
 
@@ -40,6 +41,16 @@ class _Session:
 
 def _payload() -> RegisterIn:
     return RegisterIn(email="a@b.com", password="correct horse battery")
+
+
+@pytest.fixture(autouse=True)
+def _no_account_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """O throttle por conta abre sessão própria no Postgres — stub para manter o teste sem DB."""
+
+    async def _noop(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(auth_endpoints, "enforce_account_limit", _noop)
 
 
 async def test_register_returns_userout() -> None:

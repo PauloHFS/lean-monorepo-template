@@ -57,6 +57,22 @@ def is_blocked(count: int, limit: int) -> bool:
     return count > limit
 
 
+def build_account_key(scope: str, account: str) -> str:
+    """Chave por conta: `acct:<scope>:<account>` (normalizada em lowercase)."""
+    return f"acct:{scope}:{account.lower()}"
+
+
+async def enforce_account_limit(scope: str, account: str, *, limit: int, window_s: int) -> None:
+    """Limita por conta (e-mail, tenant...) usando a mesma janela do `hit()`."""
+    count, _ = await hit(build_account_key(scope, account), limit=limit, window_s=window_s)
+    if is_blocked(count, limit):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="rate limit exceeded",
+            headers={"Retry-After": str(window_s)},
+        )
+
+
 async def hit(key: str, limit: int, window_s: int) -> tuple[int, datetime]:
     """Registra uma tentativa e devolve (count_atual, window_start)."""
     now = datetime.now(UTC)

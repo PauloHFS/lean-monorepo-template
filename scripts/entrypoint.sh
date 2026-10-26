@@ -22,6 +22,10 @@ PG_HOST="${POSTGRES_HOST:-}"
 PG_PORT="${POSTGRES_PORT:-5432}"
 WAIT_ATTEMPTS="${POSTGRES_WAIT_ATTEMPTS:-60}"
 API_INTERNAL_PORT="${API_INTERNAL_PORT:-8000}"
+# X-Forwarded-For só é confiado vindo do proxy (loopback por padrão). Sem
+# isso qualquer cliente forja o IP e ganha um bucket novo de rate limit.
+# O uvicorn lê esta variável; nunca use "*" em produção.
+export FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-127.0.0.1}"
 
 # Probe usado para a espera. `pg_isready` é preferível (fala o protocolo do
 # Postgres); sem o binário na imagem, cai no probe TCP via /dev/tcp.
@@ -73,11 +77,11 @@ case "$ROLE" in
     ;;
   api)
     echo "[entrypoint] Subindo uvicorn na porta interna ${API_INTERNAL_PORT}..."
+    # --proxy-headers usa FORWARDED_ALLOW_IPS (exportado acima).
     exec uvicorn app.main:app \
       --host "${API_HOST:-0.0.0.0}" \
       --port "${API_INTERNAL_PORT}" \
-      --proxy-headers \
-      --forwarded-allow-ips="*"
+      --proxy-headers
     ;;
   worker)
     echo "[entrypoint] Subindo worker (Procrastinate)..."

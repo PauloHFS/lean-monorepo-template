@@ -9,8 +9,17 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field, PostgresDsn, computed_field, field_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    PostgresDsn,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEFAULT_SECRET_KEY = "change-me-please-32-bytes-minimum-aaaaaaaaaaaaaaaaaaaa"
 
 
 class Settings(BaseSettings):
@@ -37,13 +46,15 @@ class Settings(BaseSettings):
     postgres_user: str = "app"
     postgres_password: str = "app"
     database_url: str | None = None
+    # Anexado à DSN (query string) quando definido; ex.: "require".
+    db_sslmode: str | None = None
 
     db_pool_size: int = 10
     db_max_overflow: int = 20
     db_pool_timeout: int = 30
 
     # --- Auth ---
-    secret_key: str = "change-me-please-32-bytes-minimum-aaaaaaaaaaaaaaaaaaaa"
+    secret_key: str = _DEFAULT_SECRET_KEY
     session_cookie_name: str = "lm_session"
     session_ttl_seconds: int = 60 * 60 * 24 * 30  # 30d
     cookie_secure: bool = False
@@ -82,6 +93,24 @@ class Settings(BaseSettings):
                 "schema caps at 72 and bcrypt rejects passwords over 72 BYTES."
             )
         return value
+
+    @model_validator(mode="after")
+    def _validate_prod(self) -> Settings:
+        """Fail-fast: config insegura em prod não sobe (AGENTS.md)."""
+        if self.app_env != "prod":
+            return self
+        problems: list[str] = []
+        if self.secret_key == _DEFAULT_SECRET_KEY or len(self.secret_key) < 32:
+            problems.append(
+                "SECRET_KEY must be changed from the default and have at least 32 characters"
+            )
+        if not self.cookie_secure:
+            problems.append("COOKIE_SECURE must be true in prod")
+        if not self.web_origin.startswith("https://"):
+            problems.append("WEB_ORIGIN must start with https:// in prod")
+        if problems:
+            raise ValueError("invalid production config: " + "; ".join(problems))
+        return self
 
     # ---------- DSNs computadas ----------
     @computed_field  # type: ignore[prop-decorator]

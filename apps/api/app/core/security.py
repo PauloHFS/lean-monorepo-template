@@ -23,6 +23,11 @@ from app.core.config import settings
 _BCRYPT_ROUNDS = 12
 _BCRYPT_MAX_PASSWORD_BYTES = 72  # limite do algoritmo
 
+# Hash fixo (custo 12) de uma senha que ninguém usa. O login verifica contra
+# ele quando o e-mail não existe, para que o tempo de resposta não revele
+# quais contas existem.
+DUMMY_PASSWORD_HASH = "$2b$12$YM4r8RAaojI.SGGBY1ZN6uNYfbeYBjeObw7w4hX.D8OB646N2BD/6"
+
 
 def _to_bytes(plain: str) -> bytes:
     encoded = plain.encode("utf-8")
@@ -76,9 +81,24 @@ def cookie_attrs() -> dict[str, Any]:
     }
 
 
+def _cookie_delete_attrs() -> dict[str, Any]:
+    """Atributos aceitos por `Response.delete_cookie` (sem `max_age`).
+
+    O starlette já envia `Max-Age=0` e uma expiração no passado; passar
+    `max_age` aqui estoura `TypeError`.
+    """
+    return {
+        "key": settings.session_cookie_name,
+        "httponly": True,
+        "secure": settings.cookie_secure,
+        "samesite": settings.cookie_samesite,
+        "path": "/",
+    }
+
+
 def set_session_cookie(response: Response, token: str) -> None:
     response.set_cookie(value=token, **cookie_attrs())
 
 
 def clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(**cookie_attrs())
+    response.delete_cookie(**_cookie_delete_attrs())

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -13,8 +14,10 @@ from app.api.deps import DB, CurrentUser
 from app.api.schemas import UserOut
 from app.core import totp as totp_mod
 from app.core.config import settings
-from app.core.ratelimit import rate_limit
+from app.core.logging import get_logger
+from app.core.ratelimit import enforce_account_limit, rate_limit
 from app.core.security import (
+    DUMMY_PASSWORD_HASH,
     clear_session_cookie,
     generate_session_token,
     hash_password,
@@ -25,6 +28,13 @@ from app.core.security import (
 )
 
 router = APIRouter()
+log = get_logger("auth")
+
+
+def _email_fingerprint(email: str) -> str:
+    """sha256 curto do e-mail normalizado — nunca logamos o endereço cru."""
+    normalized = email.strip().lower()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
 
 
 def _max_72_utf8_bytes(value: str) -> str:
@@ -73,6 +83,7 @@ class LoginOut(BaseModel):
     dependencies=[Depends(rate_limit("auth.register", limit=10, window_s=60))],
 )
 async def register(payload: RegisterIn, session: DB) -> UserOut:
+    await enforce_account_limit("register", payload.email, limit=3, window_s=3600)
     ph = hash_password(payload.password)
     try:
         row = (
@@ -96,6 +107,12 @@ async def register(payload: RegisterIn, session: DB) -> UserOut:
         await session.commit()
     except IntegrityError:
         raise HTTPException(status_code=409, detail="email already registered") from None
+    log.info(
+        "auth.register",
+        outcome="success",
+        email_fp=_email_fingerprint(payload.email),
+        user_id=str(row["id"]),
+    )
     return UserOut(**dict(row))
 
 
@@ -106,6 +123,7 @@ async def register(payload: RegisterIn, session: DB) -> UserOut:
     dependencies=[Depends(rate_limit("auth.login", limit=5, window_s=60))],
 )
 async def login(payload: LoginIn, request: Request, response: Response, session: DB) -> LoginOut:
+    await enforce_account_limit("login", payload.email, limit=10, window_s=300)
     row = (
         (
             await session.execute(
@@ -120,9 +138,23 @@ async def login(payload: LoginIn, request: Request, response: Response, session:
         .first()
     )
 
-    if not row or not verify_password(payload.password, row["password_hash"]):
+    email_fp = _email_fingerprint(payload.email)
+    if not row:
+        # Mesmo custo do caminho com usuário: não revela existência da conta.
+        verify_password(payload.password, DUMMY_PASSWORD_HASH)
+        log.warning("auth.login", outcome="failure", reason="unknown_email", email_fp=email_fp)
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    if not verify_password(payload.password, row["password_hash"]):
+        log.warning("auth.login", outcome="failure", reason="invalid_password", email_fp=email_fp)
         raise HTTPException(status_code=401, detail="invalid credentials")
     if not row["is_active"]:
+        log.warning(
+            "auth.login",
+            outcome="failure",
+            reason="inactive",
+            email_fp=email_fp,
+            user_id=str(row["id"]),
+        )
         raise HTTPException(status_code=403, detail="user inactive")
 
     # Detecta métodos 2FA habilitados
@@ -135,6 +167,14 @@ async def login(payload: LoginIn, request: Request, response: Response, session:
     )
     if pk.scalar_one_or_none():
         methods.append("passkey")
+
+    log.info(
+        "auth.login",
+        outcome="success",
+        email_fp=email_fp,
+        user_id=str(row["id"]),
+        requires_2fa=bool(methods),
+    )
 
     if methods:
         # Não emite cookie ainda — guarda pending e pede verificação
@@ -191,6 +231,7 @@ async def logout(request: Request, response: Response, session: DB) -> None:
             {"th": hash_session_token(token)},
         )
         await session.commit()
+    log.info("auth.logout", outcome="success" if token else "no_session")
     clear_session_cookie(response)
 
 

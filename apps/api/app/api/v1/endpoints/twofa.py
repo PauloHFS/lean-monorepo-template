@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, cast
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import CursorResult, text
 from webauthn import base64url_to_bytes
@@ -12,6 +12,8 @@ from webauthn import base64url_to_bytes
 from app.api.deps import DB, CurrentUser
 from app.core import totp as totp_mod
 from app.core import webauthn as wa
+from app.core.logging import get_logger
+from app.core.ratelimit import rate_limit
 from app.core.security import (
     generate_session_token,
     hash_session_token,
@@ -20,7 +22,22 @@ from app.core.security import (
 )
 from app.db.session import SessionLocal
 
+logger = get_logger(__name__)
+
 router = APIRouter(prefix="/2fa")
+
+# A credencial precisa pertencer ao usuário do pending token. Sem o predicado de
+# user_id, um atacante que sabe a senha assina o challenge com a própria passkey e
+# a verificação (e a sessão) acontece para a vítima. Exposto como constante para
+# que o teste unitário verifique o binding sem tocar no banco.
+PASSKEY_LOOKUP_SQL = (
+    "SELECT credential_id, public_key, sign_count "
+    "FROM user_passkeys WHERE credential_id = :cid AND user_id = :uid"
+)
+PASSKEY_UPDATE_SQL = (
+    "UPDATE user_passkeys SET sign_count = :sc, last_used_at = now() "
+    "WHERE credential_id = :cid AND user_id = :uid"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +82,7 @@ async def totp_setup(user: CurrentUser, session: DB) -> TotpSetupOut:
         {"enc": encrypted, "id": user.id},
     )
     await session.commit()
+    logger.info("2fa.totp.setup_requested", user_id=str(user.id))
     return TotpSetupOut(
         secret=secret,
         otpauth_uri=totp_mod.provisioning_uri(secret, user.email),
@@ -75,9 +93,11 @@ async def totp_setup(user: CurrentUser, session: DB) -> TotpSetupOut:
 async def totp_confirm(payload: TotpConfirmIn, user: CurrentUser, session: DB) -> TotpConfirmOut:
     """Ativa 2FA após validar primeiro código. Devolve recovery codes (1× só)."""
     if user.totp_secret_enc is None:
+        logger.warning("2fa.totp.confirm_failure", user_id=str(user.id), reason="setup_not_started")
         raise HTTPException(400, "totp setup not started")
     secret = totp_mod.decrypt_secret(user.totp_secret_enc)
     if not totp_mod.verify_totp(secret, payload.code):
+        logger.warning("2fa.totp.confirm_failure", user_id=str(user.id), reason="invalid_code")
         raise HTTPException(401, "invalid code")
 
     codes = totp_mod.generate_recovery_codes()
@@ -97,17 +117,26 @@ async def totp_confirm(payload: TotpConfirmIn, user: CurrentUser, session: DB) -
             {"uid": user.id, "h": totp_mod.hash_recovery_code(code)},
         )
     await session.commit()
+    logger.info("2fa.totp.confirmed", user_id=str(user.id))
     return TotpConfirmOut(enabled=True, recovery_codes=codes)
 
 
 # ---------------------------------------------------------------------------
 # Verificação após login parcial
 # ---------------------------------------------------------------------------
-@router.post("/verify", response_model=OkOut)
+@router.post(
+    "/verify",
+    response_model=OkOut,
+    # 10^6 de espaço TOTP com 3 códigos válidos por janela: sem throttle o brute
+    # force é viável. 10 tentativas/min por IP é folgado para humano e apertado
+    # para script.
+    dependencies=[Depends(rate_limit("2fa.verify", limit=10, window_s=60))],
+)
 async def twofa_verify(payload: TwoFactorVerifyIn, request: Request, response: Response) -> OkOut:
     """Consome o pending token + valida TOTP/recovery. Emite cookie de sessão."""
     pending = await totp_mod.consume_pending(payload.pending_token)
     if pending is None:
+        logger.warning("2fa.verify.failure", reason="pending_invalid")
         raise HTTPException(401, "pending token invalid or expired")
 
     user_id = pending["user_id"]
@@ -128,14 +157,17 @@ async def twofa_verify(payload: TwoFactorVerifyIn, request: Request, response: R
                 .first()
             )
         if row is None or not row["is_active"]:
+            logger.warning("2fa.verify.failure", user_id=str(user_id), reason="user_inactive")
             raise HTTPException(401, "user inactive")
         if not row["totp_enabled"]:
+            logger.warning("2fa.verify.failure", user_id=str(user_id), reason="totp_not_enabled")
             raise HTTPException(400, "2fa not enabled for this user")
 
         # Tenta TOTP primeiro
         secret = totp_mod.decrypt_secret(row["totp_secret_enc"])
         if totp_mod.verify_totp(secret, payload.code):
             user_ok = True
+            method = "totp"
         else:
             # Senão tenta recovery code
             r = cast(
@@ -153,8 +185,10 @@ async def twofa_verify(payload: TwoFactorVerifyIn, request: Request, response: R
             )
             await session.commit()
             user_ok = r.rowcount > 0
+            method = "recovery"
 
         if not user_ok:
+            logger.warning("2fa.verify.failure", user_id=str(row["id"]), reason="invalid_code")
             raise HTTPException(401, "invalid 2fa code")
 
         token = generate_session_token()
@@ -175,6 +209,7 @@ async def twofa_verify(payload: TwoFactorVerifyIn, request: Request, response: R
         )
         await session.commit()
 
+    logger.info("2fa.verify.success", user_id=str(row["id"]), method=method)
     set_session_cookie(response, token)
     return OkOut(ok=True)
 
@@ -369,13 +404,25 @@ async def passkey_register_verify(
         },
     )
     await session.commit()
+    logger.info("2fa.passkey.registered", user_id=str(user.id))
 
 
-@router.post("/passkey/login/options", response_model=PasskeyLoginOptionsOut)
+@router.post(
+    "/passkey/login/options",
+    response_model=PasskeyLoginOptionsOut,
+    dependencies=[Depends(rate_limit("2fa.passkey.login.options", limit=20, window_s=60))],
+)
 async def passkey_login_options(payload: PendingIn, session: DB) -> PasskeyLoginOptionsOut:
     """Gera options para `navigator.credentials.get()`."""
     pending = await totp_mod.consume_pending(payload.pending_token)
     if pending is None:
+        logger.warning("2fa.passkey.login.failure", reason="pending_invalid")
+        raise HTTPException(401, "pending invalid")
+    # O pending devolvido pelo login é de uso único. Depois de trocado por um
+    # challenge, o novo token já carrega "challenge" e não pode mintar outro:
+    # sem isso, quem tem a senha renova o pending indefinidamente.
+    if "challenge" in pending:
+        logger.warning("2fa.passkey.login.failure", reason="pending_reused")
         raise HTTPException(401, "pending invalid")
     keys = (
         (
@@ -403,46 +450,62 @@ async def passkey_login_options(payload: PendingIn, session: DB) -> PasskeyLogin
     )
 
 
-@router.post("/passkey/login/verify", response_model=OkOut)
+@router.post(
+    "/passkey/login/verify",
+    response_model=OkOut,
+    dependencies=[Depends(rate_limit("2fa.passkey.login.verify", limit=20, window_s=60))],
+)
 async def passkey_login_verify(
     payload: PasskeyLoginIn, request: Request, response: Response
 ) -> OkOut:
     """Verifica assertion e emite cookie."""
-    challenge_b64, pending_token = _split_challenge(payload.challenge)
-    pending = await _consume_challenge(pending_token, challenge_b64)
+    try:
+        challenge_b64, pending_token = _split_challenge(payload.challenge)
+        pending = await _consume_challenge(pending_token, challenge_b64)
+    except HTTPException as exc:
+        logger.warning("2fa.passkey.login.failure", reason=str(exc.detail))
+        raise
     user_id = pending["user_id"]
     credential_id = _credential_id(payload.credential)
 
     async with SessionLocal() as session:
         async with session.begin():
+            # O credential_id TEM que pertencer ao user do pending. Sem o
+            # predicado de user_id, a passkey do atacante verifica contra o
+            # challenge da vítima e a sessão sai para a vítima (ATO).
             pk = (
                 (
                     await session.execute(
-                        text(
-                            "SELECT credential_id, public_key, sign_count "
-                            "FROM user_passkeys WHERE credential_id = :cid"
-                        ),
-                        {"cid": credential_id},
+                        text(PASSKEY_LOOKUP_SQL),
+                        {"cid": credential_id, "uid": user_id},
                     )
                 )
                 .mappings()
                 .first()
             )
         if pk is None:
+            logger.warning(
+                "2fa.passkey.login.failure", user_id=str(user_id), reason="no_passkey_for_user"
+            )
             raise HTTPException(401, "no passkey for user")
 
-        new_sign_count = wa.complete_authentication(
-            challenge_b64=challenge_b64,
-            credential=payload.credential.model_dump(exclude_none=True),
-            public_key=bytes(pk["public_key"]),
-            sign_count=pk["sign_count"],
-        )
+        try:
+            new_sign_count = wa.complete_authentication(
+                challenge_b64=challenge_b64,
+                credential=payload.credential.model_dump(exclude_none=True),
+                public_key=bytes(pk["public_key"]),
+                sign_count=pk["sign_count"],
+            )
+        except Exception as exc:
+            logger.warning(
+                "2fa.passkey.login.failure",
+                user_id=str(user_id),
+                reason=type(exc).__name__,
+            )
+            raise
         await session.execute(
-            text(
-                "UPDATE user_passkeys SET sign_count = :sc, last_used_at = now() "
-                "WHERE credential_id = :cid"
-            ),
-            {"sc": new_sign_count, "cid": credential_id},
+            text(PASSKEY_UPDATE_SQL),
+            {"sc": new_sign_count, "cid": credential_id, "uid": user_id},
         )
         await session.commit()
 
@@ -464,6 +527,7 @@ async def passkey_login_verify(
         )
         await session.commit()
 
+    logger.info("2fa.passkey.login.success", user_id=str(user_id))
     set_session_cookie(response, token)
     return OkOut(ok=True)
 
