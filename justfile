@@ -84,7 +84,7 @@ semgrep:
 # Audit de dependencias de producao do backend (pip-audit via uvx)
 api-audit:
     cd apps/api && UV_PROJECT_ENVIRONMENT=.venv-audit uv sync --frozen --no-dev
-    cd apps/api && uvx pip-audit@2.10.1 --path .venv-audit/lib/python3.12/site-packages
+    cd apps/api && uvx pip-audit@2.10.1 --path .venv-audit/lib/python3.13/site-packages
 
 # Roda tudo que o CI roda: tests/lint/typecheck/bandit/semgrep do back
 # + web typecheck/lint/audit + audit do back + schema + valida o docker compose

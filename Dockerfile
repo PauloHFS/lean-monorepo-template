@@ -3,7 +3,7 @@
 # Multi-stage:
 #   1) build-web: Node/Vite → /web/dist (efêmero)
 #   2) build-api: Python + toolchain de compilação → /opt/venv (só deps runtime)
-#   3) runtime:   python:3.12-slim + só os artefatos, non-root, sem toolchain
+#   3) runtime:   python:3.13-slim + só os artefatos, non-root, sem toolchain
 #
 # Os cache mounts (`RUN --mount=type=cache`) exigem BuildKit — padrão no
 # Docker 23+, Docker Desktop, docker compose moderno e GitHub Actions.
@@ -25,7 +25,7 @@ COPY apps/web ./
 RUN npm run build
 
 # ---- Stage 2: dependências Python (toolchain só existe aqui) ----------------
-FROM python:3.12-slim AS build-api
+FROM python:3.13-slim AS build-api
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /uvx /bin/
 
@@ -45,13 +45,13 @@ WORKDIR /app
 
 COPY apps/api/pyproject.toml apps/api/uv.lock /app/apps/api/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    cd /app/apps/api && uv sync --frozen --no-dev --python /usr/local/bin/python3.12
+    cd /app/apps/api && uv sync --frozen --no-dev --python /usr/local/bin/python3.13
 
 # ---- Stage 3: runtime -------------------------------------------------------
 # MESMA base do build-api de propósito: o venv em /opt/venv tem pyvenv.cfg
-# apontando para /usr/local/bin/python3.12, que existe identicamente aqui.
+# apontando para /usr/local/bin/python3.13, que existe identicamente aqui.
 # Trocar a base (ex.: alpine, distro-slim diferente) quebra o venv.
-FROM python:3.12-slim AS runtime
+FROM python:3.13-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

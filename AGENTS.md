@@ -11,7 +11,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 
 ## 2. Arquitetura
 
-- **Backend (`/apps/api`)**: Python 3.12 gerenciado por `uv`, FastAPI, Pydantic v2, SQLAlchemy 2.0 assíncrono/Core, Alembic, Procrastinate e PostgreSQL.
+- **Backend (`/apps/api`)**: Python **3.13** gerenciado por `uv`, FastAPI, Pydantic v2, SQLAlchemy 2.0 assíncrono/Core, Alembic, Procrastinate e PostgreSQL.
 - **Frontend (`/apps/web`)**: TypeScript strict, React 19, Vite 8 (Rolldown/Oxc), Tailwind CSS 4, Biome e tipos gerados do OpenAPI. Node 24 é o piso do front (o Node 20 está EOL e o Vite 8 exige `^20.19 || >=22.12`); a versão mora em `.node-version`.
 - **Princípio arquitetural**: PostgreSQL é a única fonte de estado do backend. Cache, filas, sessões e rate limiting pertencem ao PostgreSQL; não introduza Redis, Celery ou outro serviço sem uma nova ADR.
 - **Princípio de interface**: toda rota nova possui contrato Pydantic de entrada e saída; o frontend consome os tipos gerados pelo OpenAPI.
@@ -90,7 +90,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 ### Testes
 
 - Testes unitários não tocam Postgres (AD-008): o runner SQL é testado como texto, não executado.
-- Validadores, criptografia e rate limiter têm testes de propriedades com Hypothesis (`apps/api/tests/test_properties_*.py`).
+- Validadores, criptografia e rate limiter têm testes de propriedades com Hypothesis (`apps/api/tests/test_properties_*.py`); são testes puramente em memória e não tocam Postgres (AD-008).
 - bcrypt custa ~100 ms por hash: use `@settings(deadline=None, max_examples=...)` ou o Hypothesis vira fábrica de flakes.
 - Não duplique em Python a semântica que mora no SQL; extraia só a parte pura (chave, decisão) e teste isso.
 
@@ -118,7 +118,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 
 ### Imagem, saúde e boot
 
-- O Dockerfile é multi-stage (`build-web` → `build-api` → `runtime`): toolchain e uv ficam só no stage de build; a imagem final copia apenas `/opt/venv` e roda como `app` (uid 10001, sem shell). Não reinstale toolchain na final, não adicione `curl` (o healthcheck usa o `urllib` do venv) e **não troque a base do runtime**: o venv referencia `/usr/local/bin/python3.12` por symlink absoluto.
+- O Dockerfile é multi-stage (`build-web` → `build-api` → `runtime`): toolchain e uv ficam só no stage de build; a imagem final copia apenas `/opt/venv` e roda como `app` (uid 10001, sem shell). Não reinstale toolchain na final, não adicione `curl` (o healthcheck usa o `urllib` do venv) e **não troque a base do runtime**: o venv referencia `/usr/local/bin/python3.13` por symlink absoluto.
 - Liveness ≠ readiness: `/api/v1/livez` não toca o banco (liveness decide restart); `/api/v1/healthz` checa o banco e devolve **503** + `degraded`/`db=false` (readiness é para proxy/LB). O HEALTHCHECK do container é o **livez** — se fosse o readiness, uma queda do Postgres reiniciaria um processo saudável.
 - `worker` e `migrate` desligam o healthcheck da imagem (`healthcheck: disable: true`): não servem HTTP.
 - Papéis do entrypoint: `migrate` (one-shot, roda `alembic upgrade head`), `api`, `worker`. api/worker **não** rodam migration (evita corrida). A espera do Postgres usa `pg_isready` (fallback TCP) e **termina com `exit 1`** ao estourar.

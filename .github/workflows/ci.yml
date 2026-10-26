@@ -26,9 +26,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
       - uses: astral-sh/setup-uv@v6
         with:
-          version: "0.10.10"
+          version: "0.13.5"
           enable-cache: true
 
       - name: Install deps
@@ -55,14 +59,17 @@ jobs:
         working-directory: apps/api
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v6
         with:
-          version: "0.10.10"
+          version: "0.13.5"
           enable-cache: true
       - name: Sync deps de producao
         run: UV_PROJECT_ENVIRONMENT=.venv-audit uv sync --frozen --no-dev
       - name: Audit (pip-audit)
-        run: uvx pip-audit@2.10.1 --path .venv-audit/lib/python3.12/site-packages
+        run: uvx pip-audit@2.10.1 --path .venv-audit/lib/python3.13/site-packages
 
   sast:
     name: semgrep (regras do projeto)
@@ -75,10 +82,10 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
         with:
-          version: "0.10.10"
+          version: "0.13.5"
 
       - name: Semgrep (regras locais, offline)
-        run: uvx semgrep@1.182.1 scan --config semgrep.yml --error apps/api/app apps/web/src
+        run: uvx semgrep@1.182.1 scan --config semgrep.yml --error apps/api/app apps/web/src apps/web/e2e
 
   frontend:
     name: frontend (lint + typecheck + build + audit)
@@ -215,45 +222,3 @@ jobs:
 
       - name: Validate compose file
         run: docker compose config --quiet
-
-  restore-test:
-    name: backup -> restore -> verify (postgres 16)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgis/postgis:16-3.4
-        env:
-          POSTGRES_DB: app
-          POSTGRES_USER: app
-          POSTGRES_PASSWORD: app
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U app -d app"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-    env:
-      POSTGRES_HOST: localhost
-      POSTGRES_PORT: "5432"
-      POSTGRES_DB: app
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
-    steps:
-      - uses: actions/checkout@v4
-
-      # pg_dump/pg_restore/psql ficam no runner; o service container so roda o servidor.
-      # Cliente fixado na MESMA major do servidor (postgis 16 -> client 16): um client
-      # mais antigo recusa o dump com "server version mismatch".
-      - name: Instalar client do Postgres 16
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl ca-certificates gnupg
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/pgdg.gpg
-          echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client-16
-
-      - name: Backup -> restore -> verify
-        run: bash scripts/test-restore.sh

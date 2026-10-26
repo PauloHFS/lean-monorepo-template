@@ -57,7 +57,7 @@
   "ruff.fixAll": true,
   "ruff.organizeImports": true,
   "ruff.lineLength": 100,
-  "ruff.target": "py312",
+  "ruff.target": "py313",
 
   "[typescript]": {
     "editor.defaultFormatter": "biomejs.biome"

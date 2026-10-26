@@ -334,7 +334,7 @@ temporário, o que exige `ensurepip` — inviável com o Python gerenciado pelo 
   via `uvx` (semgrep, pip-audit) ou `uv tool install`.
 - Atualização de segurança é bump em `pyproject.toml` + `uv lock` (ex.: aiosmtplib
   3.0.1 → 5.1.3, python-multipart 0.0.30 → 0.0.31, pytest 8.3.4 → 9.0.3).
-- `uv` exige Python >= 3.10 no host; o projeto fixa 3.12 (`.python-version`).
+- `uv` exige Python >= 3.10 no host; o projeto fixa 3.13 (`.python-version`).
 
 ---
 
@@ -643,7 +643,7 @@ truncado passava — e **não existia** `restore.sh` nem teste de restauração.
   npm e uv (BuildKit); toolchain e uv ficam só no stage de build; a imagem final
   copia apenas `/opt/venv` e roda como `app` (uid 10001, sem shell). O `curl`
   sai: o healthcheck usa o `urllib` do próprio venv. A base do runtime é a
-  **mesma** do build porque o venv referencia `/usr/local/bin/python3.12` por
+  **mesma** do build porque o venv referencia `/usr/local/bin/python3.13` por
   symlink absoluto — trocar a base quebra o venv.
 - **Saúde em camadas**: `/api/v1/livez` (liveness, não toca o banco) e
   `/api/v1/healthz` (readiness, timeout de 2s, 503 + `degraded`/`db=False`
@@ -885,7 +885,7 @@ existia com `node = "24"` dentro de `[tools]`, o que criava uma quarta cópia. O
   caminho do request syntax é o prefixo `path:`, que **não** ativa o binário.
   A solução é o setting de version file idiomático.
 - uv 0.13.x muda o default do Python para 3.15 quando nenhum é pedido — não
-  afeta este projeto, que fixa 3.12 (`.python-version` + `requires-python`).
+  afeta este projeto, que fixa 3.13 (`.python-version` + `requires-python`).
 
 ---
 
@@ -910,7 +910,7 @@ dependências estavam **declaradas e sem uso**: `python-multipart` e
 - **SQLAlchemy 2.0.55, não 2.1.6**: o `opentelemetry-instrumentation-sqlalchemy`
   declara `sqlalchemy<2.1.0` e os autores do instrumentor não testam a série
   2.1 — e o repo instrumenta o engine (AD-016). A série 2.0.x ainda é mantida.
-- **Python continua 3.12** (EOL só em out/2028): trocar de interpreter exige
+- **Python continua 3.13** (EOL só em out/2029): trocar de interpreter exige
   reescrever `requires-python`, `.python-version`, `ruff.target-version`,
   `pyrightconfig.json` e **os dois** `FROM` do Dockerfile (o venv referencia o
   interpretador por symlink absoluto) — mudança própria, não um bump.
