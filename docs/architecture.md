@@ -327,8 +327,7 @@ temporário, o que exige `ensurepip` — inviável com o Python gerenciado pelo 
 - Local: `uv sync` cria/atualiza `apps/api/.venv`; `uv run <cmd>` executa ferramentas.
   CI: `uv sync --locked` (falha se o lock divergir do `pyproject.toml`).
   Docker: binário do `uv` copiado da imagem `ghcr.io/astral-sh/uv` pinada; o venv
-  da imagem fica em `/opt/venv` (`UV_PROJECT_ENVIRONMENT`) para não ser encoberto
-  pelo bind mount de `apps/api` no compose.
+  da imagem fica em `/opt/venv` (`UV_PROJECT_ENVIRONMENT`), fora da árvore do projeto.
 - Auditoria de dependências de produção: `just api-audit` roda
   `uvx pip-audit@2.10.1 --path` contra um env prod-only (`.venv-audit`), sem
   resolver/instalar nada — logo sem depender de `ensurepip`.
@@ -650,7 +649,10 @@ truncado passava — e **não existia** `restore.sh` nem teste de restauração.
   copia apenas `/opt/venv` e roda como `app` (uid 10001, sem shell). O `curl`
   sai: o healthcheck usa o `urllib` do próprio venv. A base do runtime é a
   **mesma** do build porque o venv referencia `/usr/local/bin/python3.13` por
-  symlink absoluto — trocar a base quebra o venv.
+  symlink absoluto — trocar a base quebra o venv. O stage `runtime` remove o `pip`
+  da base (e o wheel do `ensurepip`): as libs vendorizadas dele (`msgpack`,
+  `urllib3`, `pkg_resources`) têm CVE HIGH (4 findings do Trivy no CI) e o venv do
+  `uv` em `/opt/venv` não usa system site-packages.
 - **Saúde em camadas**: `/api/v1/livez` (liveness, não toca o banco) e
   `/api/v1/healthz` (readiness, timeout de 2s, 503 + `degraded`/`db=False`
   reais). O HEALTHCHECK do container usa **livez**: é o liveness que decide
@@ -1250,8 +1252,10 @@ entregar uma imagem com trilha verificável.
   spdxjson`), com `persist-credentials: false` no checkout.
 - Permissões mínimas: `contents: read` no workflow e, no job de publicação,
   `packages: write` + `id-token: write` (OIDC keyless). O SBOM também sobe como artifact.
-- `just ci` valida o compose, que interpola `${GRAFANA_ADMIN_PASSWORD:?...}`: a invocação
-  local é `GRAFANA_ADMIN_PASSWORD=... just ci`.
+- `just ci` valida o compose, que interpola `${GRAFANA_ADMIN_PASSWORD:?...}`. O gate
+  materializa um `.env` a partir do `.env.example` se preciso e injeta
+  `GRAFANA_ADMIN_PASSWORD=validation-only` quando a variável está ausente/vazia; a senha
+  real só é exigida ao subir o stack de observability de verdade.
 
 **Consequences**:
 - Um tag retarget não muda silenciosamente o que roda no CI; atualizar action exige trocar
@@ -1260,8 +1264,105 @@ entregar uma imagem com trilha verificável.
   estática no repositório.
 - O piso `moderate` no CI é mais estrito que o `high` local; a divergência é intencional
   (CI é a barreira final).
-- O compose de observability é validado no `just ci` e falha sem a senha do Grafana — o
-  erro é de config, não de infraestrutura.
+- O compose (inclusive o stack de observability) é validado no `just ci` com um valor de
+  validação para `GRAFANA_ADMIN_PASSWORD`, sem exigir a senha real na invocação.
+
+---
+
+## AD-036 · TLS na borda e contrato de proxy confiável
+
+**Status**: current.
+
+**Context**: a app serve **HTTP puro** (AD-028/AD-029) e TLS é requisito de deployment, não
+de código. O alvo real é uma VPS com **Coolify** na frente de Cloudflare (proxy laranja ou
+Tunnel). Sem um contrato explícito de borda, cada deploy reinventa onde termina o TLS, quem
+manda os headers de segurança e como o IP do cliente chega ao rate limit — e as duas
+últimas decisões erram em silêncio (HSTS/CSP duplicados quebram o app; `FORWARDED_ALLOW_IPS`
+errado fura o throttle). A AD-005 (a app serve o SPA), a AD-029 (HSTS/CSP em prod) e a
+AD-032 (proxy confiável) continuam vigentes; esta ADR as conecta ao caminho de deploy.
+
+**Decision**:
+- **O proxy é externo ao repo**: o Coolify entrega Traefik v3.7 por padrão (trocável por
+  Caddy ou "none" na UI); Cloudflare Tunnel é a alternativa de borda. O repositório não
+  embute Caddy nem `cloudflared` e **a app nunca termina TLS** — nem no uvicorn, nem por
+  configuração condicional.
+- **O repo entrega o contrato, não o proxy**: compose com os serviços core sem profile,
+  portas publicadas só em loopback, `FORWARDED_ALLOW_IPS` explícito e a doc operacional no
+  `README.md` ("Implantar no Coolify"). A imagem buildada é a fonte da verdade: nada de
+  bind-mount de `apps/api`/`scripts` mascarando o artefato.
+- O Coolify fala com o container pelo **IP na rede Docker**, não pela porta publicada no
+  host — é isso que permite publicar `127.0.0.1:${API_PORT}` sem quebrar o roteamento.
+
+**Contrato de cabeçalhos e confiança**:
+- O uvicorn (`--proxy-headers`) só olha `X-Forwarded-For`/`X-Forwarded-Proto` quando o peer
+  TCP está em `FORWARDED_ALLOW_IPS`; peer fora da lista → ambos são **ignorados**.
+- Com peer confiável, o uvicorn caminha o XFF **da direita para a esquerda** e devolve o
+  primeiro host **não** confiável. Com `*` ele devolve o item **mais à esquerda** — que o
+  cliente controla. Por isso **`*` é proibido** e o proxy deve sempre **ANEXAR** o IP que
+  observou, nunca repassar o XFF cru do visitante.
+- Os três valores válidos de `FORWARDED_ALLOW_IPS`: `127.0.0.1` (proxy no host ou
+  `cloudflared` em loopback), `172.16.0.0/12` (Coolify: o Traefik tem IP **dinâmico** na
+  rede do recurso, sem subnet fixa, e não existe env var oficial do Coolify com esse IP) e
+  de novo `127.0.0.1` (Cloudflare Tunnel).
+- O Traefik default do Coolify **apaga** os `X-Forwarded-*` do peer e **anexa** o próprio
+  peer. Para preservar o IP do visitante com Cloudflare na frente, configure
+  `--entrypoints.{http,https}.forwardedHeaders.trustedIPs=<ranges IP da Cloudflare>` nos
+  comandos custom do proxy (o Coolify os preserva). Sem isso a app enxerga só o IP da borda
+  CF ou o do proxy.
+- A borda Cloudflare anexa o IP real no fim do XFF; `CF-Connecting-IP` é o header de IP real
+  (o `X-Real-IP` é removido).
+
+**Matriz de responsabilidades**:
+
+| Camada | Responsabilidade |
+|---|---|
+| Proxy (Traefik/Caddy do Coolify, Cloudflare Tunnel) | terminação TLS, redirect 80→443, HTTP/2 e HTTP/3, compressão, access log |
+| App (FastAPI) | HSTS, CSP, authn/authz, throttle por IP **e** por conta, validação de entrada, audit log, cookie de sessão |
+
+- **HSTS e CSP ficam NA APP** (AD-029). O proxy **não injeta headers de segurança**: a CSP
+  evolui junto com o front (o `dist/` é servido pela própria app, AD-005), e duas CSPs se
+  intersectam — a mais restritiva vence e quebra o app em silêncio, sem erro no deploy.
+- O throttle de borda do Cloudflare Free é grosseiro demais (1 regra, janela de 10 s, sem
+  campo de conta); o **rate limit da aplicação** (AD-009/AD-031) é o principal.
+
+**Consequences**:
+- `postgres`, `migrate`, `api` e `worker` **sem `profiles:`**: o Coolify roda
+  `docker compose up -d` sem `--profile` (bug #6395) e serviço com profile não sobe.
+- `api` e `postgres` publicam só em loopback (`127.0.0.1:${API_PORT:-8000}:8000`,
+  `127.0.0.1:${POSTGRES_PORT:-5432}:5432`); a internet fala com o proxy, não com o container.
+- O compose não monta o código-fonte sobre a imagem: a imagem é o artefato que o CI mediu e
+  assinou (AD-035), e bind-mount a mascararia.
+- Deploy e borda documentados no `README.md`, não espalhados em comentários de compose.
+
+**Limites conhecidos**:
+- Cloudflare corta corpo em **100 MB** (413) e leitura em **125 s** (524): upload grande vai
+  por **URL pré-assinada do R2** e resposta HTTP rápida (job assíncrono).
+- O IP do proxy do Coolify é dinâmico → CIDR, nunca IP exato.
+- O Traefik default apaga o XFF do peer → sem `trustedIPs` o IP real se perde com Cloudflare.
+- ACME HTTP-01 **não completa** atrás de Cloudflare nem de tunnel → DNS challenge ou Origin
+  Certificate.
+- Rate limit de borda do plano Free não substitui o da app.
+- Coolify marca o deploy **FINISHED antes do healthcheck** (não espera `--wait`) e renomeia
+  `container_name`, projeto e volumes; Compose não faz rolling update.
+- `FORWARDED_ALLOW_IPS` errado falha **em silêncio**: o rate limit passa a compartilhar um
+  bucket (ou a aceitar IP forjado), sem erro no boot.
+
+**Rejeitados**:
+- Caddy ou `cloudflared` **dentro** do compose: o proxy é do Coolify ou da Cloudflare; o repo
+  não mantém um segundo caminho de borda.
+- TLS no uvicorn: a app não tem nem deve ter material de chave; o certificado é do proxy.
+- `FORWARDED_ALLOW_IPS="*"`: bypass de rate limit por header spoofing.
+- Servir o `dist/` pelo proxy: a app continua servindo o SPA e a API na mesma origem (AD-005).
+
+**Checklist de validação (quando o Docker puder rodar)**:
+1. `docker compose build` e `docker compose up -d` com `GRAFANA_ADMIN_PASSWORD` definida.
+2. `docker compose run --rm migrate` (ou o one-shot do compose) contra um Postgres real:
+   `alembic upgrade head` aplica sem erro.
+3. `just e2e-full` contra a SPA servida pela API em `:8000`.
+4. TLS real: `https://` responde com certificado válido e `http://` redireciona para https.
+5. IP real refletido: com `FORWARDED_ALLOW_IPS` correto, `request.client.host` (log/rate
+   limit) mostra o IP do visitante, não o da borda; com o valor errado, muda para o da borda.
+6. Cookie de sessão sai com `Secure` e volta no navegador sob HTTPS.
 
 ---
 

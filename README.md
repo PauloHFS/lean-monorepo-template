@@ -56,7 +56,7 @@ Template enxuto de monoprojeto com:
 │   └── prometheus.yml
 ├── docs/architecture.md      ADRs
 ├── Dockerfile                multi-stage (Node build + Python runtime)
-├── docker-compose.yml        postgres (+ app: api+worker · dev: mailpit · observability)
+├── docker-compose.yml        postgres + migrate + api + worker (dev: mailpit · observability)
 ├── justfile                  atalhos de DX
 ├── .env.example              template de variáveis
 └── .pre-commit-config.yaml   pre-commit-hooks + schema-sync
@@ -72,6 +72,8 @@ cp .env.example .env
 just init          # build + up + wait
 ```
 
+`env_file: .env` é obrigatório em `migrate`, `api` e `worker`. Em clone fresco, `just validate-compose` (e o job `compose` do CI) materializam um `.env` temporário a partir do `.env.example`; para subir a stack, faça o `cp` acima e preencha os segredos.
+
 Endpoints:
 
 - App: <http://localhost:8000>  (mesmo host serve SPA + API)
@@ -83,7 +85,7 @@ Endpoints:
 Pra criar um admin e logar:
 
 ```bash
-docker compose --profile app exec api python -m app.cli seed   # imprime email + senha aleatória
+docker compose exec api python -m app.cli seed   # imprime email + senha aleatória
 ```
 
 ## Dev local (Postgres em Docker, app no host)
@@ -255,7 +257,7 @@ URLs:
 - Prometheus: <http://localhost:9090>
 
 Credenciais default do compose (Postgres `app`/`app`) são só para dev local.
-`GRAFANA_ADMIN_PASSWORD` é **obrigatória** no profile `observability`: o compose usa `${GRAFANA_ADMIN_PASSWORD:?...}` e recusa subir sem ela (o Grafana 11.3.1 cairia em `admin`/`admin`).
+`GRAFANA_ADMIN_PASSWORD` precisa de um valor sempre que o Compose for interpolado: o compose usa `${GRAFANA_ADMIN_PASSWORD:?...}` e a interpolação é global — `docker compose up` falha sem ela mesmo sem o profile `observability` (o Grafana 11.3.1 cairia em `admin`/`admin`). Qualquer valor satisfaz o `config`; o valor real só importa quando o stack de observability sobe. `just validate-compose` (e o job do CI) injeta um valor de validação quando a variável está ausente, então não é preciso passá-la na invocação.
 
 Sem Sentry self-hosted (pesado demais). Se precisar de error tracking, use Sentry SaaS via `SENTRY_DSN`.
 
@@ -263,16 +265,50 @@ Sem Sentry self-hosted (pesado demais). Se precisar de error tracking, use Sentr
 
 ## Produção
 
-O repositório serve **HTTP puro**. **TLS é requisito de deployment**: coloque um reverse proxy/balanceador terminando HTTPS na frente da API. Sem TLS o cookie `Secure` não volta ao navegador e o HSTS não protege nada — o app não embute TLS.
+O repositório serve **HTTP puro**. **TLS é requisito de deployment**: coloque um reverse proxy/balanceador terminando HTTPS na frente da API. Sem TLS o cookie `Secure` não volta ao navegador e o HSTS não protege nada — a app não embute TLS e o repo não embute proxy (o caminho Coolify está logo abaixo; contrato em AD-036).
 
 - **Fail-fast de configuração**: com `APP_ENV=prod` o boot aborta se `SECRET_KEY` ainda for o default (ou tiver <32 chars), se `COOKIE_SECURE=false` ou se `WEB_ORIGIN` não começar com `https://`. Config impossível não sobe.
-- **Proxy confiável**: `FORWARDED_ALLOW_IPS` deve listar **só** os IPs/redes do seu proxy (default `127.0.0.1`). **Nunca use `*`**: qualquer cliente forjaria `X-Forwarded-For` e ganharia um bucket novo de rate limit.
+- **Proxy confiável**: `FORWARDED_ALLOW_IPS` deve listar **só** os IPs/redes do seu proxy (default `127.0.0.1`). **Nunca use `*`**: qualquer cliente forjaria `X-Forwarded-For` e ganharia um bucket novo de rate limit. No Coolify o Traefik tem IP dinâmico na rede do recurso: use `172.16.0.0/12`, nunca o IP exato.
 - **Postgres gerenciado**: defina `DB_SSLMODE` (ex.: `require`) — ele é anexado/sobrescrito na DSN. A baseline não exige `uuid-ossp` (usa `gen_random_uuid()`) e trata `pg_cron` como opcional (RDS/Aurora/Cloud SQL sobem sem ela; a limpeza periódica fica com o operador). `citext` continua obrigatória.
-- **Grafana**: `GRAFANA_ADMIN_PASSWORD` é obrigatória no profile `observability`; sem ela o Compose recusa subir.
-- **Mailpit**: fica atrás do profile `dev` e não sobe com `--profile app`. Use `docker compose --profile dev up -d mailpit` quando precisar capturar e-mail local.
+- **Grafana**: `GRAFANA_ADMIN_PASSWORD` precisa de um valor sempre que o Compose for interpolado (interpolação global do `${VAR:?}`, mesmo sem o profile `observability`); o valor real só importa quando o stack de observability roda. `just validate-compose` e o CI usam um valor de validação automaticamente.
+- **Mailpit**: fica atrás do profile `dev` e não sobe no `docker compose up` padrão. Use `docker compose --profile dev up -d mailpit` quando precisar capturar e-mail local.
 - **Docs desligados**: em prod `/api/docs`, `/api/redoc` e `/api/openapi.json` não existem. HSTS e CSP só são aplicados em prod.
 - **Backup**: `BACKUP_ENCRYPT_PASSPHRASE` cifra o dump (AES-256-CBC/PBKDF2) antes de manter/enviar; sem ela o dump sai em claro e o script avisa. Os dumps são `0600`; `BACKUP_KEEP_COUNT` controla a retenção local (default 14).
 - **Entrega**: `.github/workflows/deploy.yml` publica no GHCR a cada push na `main`/tag `v*` e anexa SBOM SPDX (syft) + assinatura keyless (cosign/OIDC). As actions são pinadas por commit SHA; o Dependabot abre PRs semanais para pip, npm, GitHub Actions e Docker.
+
+---
+
+## Implantar no Coolify (VPS)
+
+O repo **não embute proxy**: a app sobe HTTP puro e o TLS termina no proxy do Coolify (Traefik v3.7 por padrão) ou no Cloudflare. Contrato de cabeçalhos, matriz de responsabilidades e limites em `docs/architecture.md` (AD-036).
+
+1. **Recurso**: build pack **Docker Compose**, Base Directory = raiz do repo, Docker Compose Location = `docker-compose.yml`. O Coolify roda `docker compose up -d` **sem `--profile`**, então `postgres`, `migrate`, `api` e `worker` sobem juntos; os perfis `dev` (mailpit) e `observability` continuam opcionais.
+2. **Env vars**: cole na UI do Coolify (Developer view aceita formato `.env`). Copie o `.env.example` e troque o que é de prod:
+
+   ```dotenv
+   APP_ENV=prod
+   SECRET_KEY=<32+ chars aleatórios>
+   COOKIE_SECURE=true
+   WEB_ORIGIN=https://app.example.com
+   POSTGRES_PASSWORD=<senha forte>
+   DATABASE_URL=
+   FORWARDED_ALLOW_IPS=172.16.0.0/12
+   GRAFANA_ADMIN_PASSWORD=<qualquer valor>
+   ```
+
+   Preencha `DATABASE_URL` **ou** os `POSTGRES_*` (dentro do compose o host do banco é `postgres`); em Postgres gerenciado, defina `DB_SSLMODE=require`. `GRAFANA_ADMIN_PASSWORD` é exigida **mesmo sem** o profile `observability`: a interpolação `${GRAFANA_ADMIN_PASSWORD:?...}` do Compose é global. O `.env` versionado no repo **não é lido**: o Coolify gera/sobrescreve o `.env` do diretório de deploy e injeta `env_file: ['.env']` — a fonte é a UI.
+3. **Domínio**: só no serviço `api` e com o sufixo da porta interna (`app.example.com:8000`). O `8000` é a porta do container; a publicada no host é só `127.0.0.1:${API_PORT}` e o proxy fala pelo IP da rede Docker.
+4. **Borda** — escolha uma:
+   - **(a) Cloudflare com proxy (nuvem laranja)**: o Traefik precisa confiar nos ranges da Cloudflare para preservar o IP real — `--entrypoints.{http,https}.forwardedHeaders.trustedIPs=<ranges da CF>` (comandos custom do proxy são preservados pelo Coolify). Sem isso a app enxerga só o IP da borda. O certificado vem por DNS challenge da Cloudflare ou Cloudflare Origin Certificate: HTTP-01 não completa com o proxy da CF ligado.
+   - **(b) Cloudflare Tunnel**: crie o recurso pelo template `cloudflared`, roteie o hostname para `http://localhost:80` e **desligue "Redirect HTTP to HTTPS"** no recurso (senão vira loop). Nesse caminho use `FORWARDED_ALLOW_IPS=127.0.0.1`; o ACME HTTP-01 do Traefik também não completa atrás do tunnel — use DNS challenge ou Origin Cert.
+5. **Backup**: use o **backup agendado do Coolify** para S3/R2 (o modo "database inside a service" lê os `POSTGRES_*` do container). Os `scripts/backup.sh` do repo são o caminho **fora** do Coolify (rodam no host e exigem `pg_dump`).
+6. **Gotchas do Coolify**:
+   - não passa `--profile` (bug #6395) — por isso os serviços core não têm profile;
+   - o deploy é marcado **FINISHED antes do healthcheck** (não espera `--wait`); a saúde real aparece depois;
+   - `container_name`, nome do projeto e volumes são renomeados pelo Coolify;
+   - Docker Compose não faz rolling update;
+   - `${VAR:?}` é interpolado globalmente (ver `GRAFANA_ADMIN_PASSWORD` acima).
+7. **Sem Coolify**: ponha um proxy próprio (Caddy/nginx) no host terminando TLS em `127.0.0.1:${API_PORT}`. API e Postgres já publicam só em loopback; use `FORWARDED_ALLOW_IPS=127.0.0.1`.
 
 ---
 
@@ -283,7 +319,7 @@ O repositório serve **HTTP puro**. **TLS é requisito de deployment**: coloque 
 ### Dev local (Mailpit)
 
 ```bash
-docker compose --profile app --profile dev up -d   # Postgres + api + worker + mailpit
+docker compose --profile dev up -d   # Postgres + migrate + api + worker + mailpit
 just mail                                          # abre http://localhost:8025
 ```
 
@@ -341,7 +377,7 @@ just backup-now
 4. `rclone copyto` → `r2:<bucket>/db/<arquivo>` (sem `RCLONE_BUCKET` roda em modo local e **mantém** o dump).
 5. `rclone delete --min-age 14d` → retenção remota; no modo local, `BACKUP_KEEP_COUNT` (default 14) mantém os últimos dumps.
 
-Os scripts rodam no **host** (precisam de `pg_dump`/`pg_restore`/`psql` no PATH) e usam `flock` para não se sobrepor.
+Os scripts rodam no **host** (precisam de `pg_dump`/`pg_restore`/`psql` no PATH) e usam `flock` para não se sobrepor. Dentro do Coolify, o caminho é o backup agendado do Coolify para S3/R2 (ver "Implantar no Coolify").
 
 ### Restauração (com prova)
 
@@ -401,7 +437,7 @@ No front, os tipos vêm de `components["schemas"][...]` (reexportados em `src/ap
 
 `.github/workflows/deploy.yml` publica a imagem no GHCR em push na `main`/tag `v*`, gera SBOM SPDX com syft e assina imagem + SBOM com cosign keyless (OIDC). As actions do CI e do deploy são pinadas por **commit SHA**; o Dependabot abre PRs semanais para pip, npm, GitHub Actions e Docker.
 
-Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, E2E mock, schema e compose). O `validate-compose` interpola `GRAFANA_ADMIN_PASSWORD`, então rode `GRAFANA_ADMIN_PASSWORD=... just ci`. O build da imagem, a medição do tamanho, o Trivy e a prova de restauração só rodam no CI (exigem daemon).
+Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, E2E mock, schema e compose). O `validate-compose` materializa um `.env` a partir do `.env.example` se não houver um e usa `GRAFANA_ADMIN_PASSWORD=validation-only` quando a variável está ausente/vazia — não é preciso passá-la na invocação. O build da imagem, a medição do tamanho, o Trivy e a prova de restauração só rodam no CI (exigem daemon).
 
 ---
 

@@ -128,8 +128,8 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - Nunca versione `.env`, credenciais, tokens ou chaves. Use `.env.example` apenas para nomes de variáveis sem segredos.
 - Configuração impossível é erro de config, e erro de config falha **alto e no boot**: o `Settings` valida o que a aplicação não consegue cumprir (ex.: `password_min_length` tem que estar em 1..72, senão o schema de senha é impossível). Nunca capar o valor em silêncio.
 - **Fail-fast de produção**: `Settings._validate_prod` (`model_validator(mode="after")`) recusa o boot com `APP_ENV=prod` se `SECRET_KEY` for o default ou tiver <32 chars, se `COOKIE_SECURE=false` ou se `WEB_ORIGIN` não começar com `https://`. Não relaxe esse validador para "fazer subir".
-- **TLS é requisito de deployment**: o repo serve HTTP puro; produção exige um reverse proxy/LB terminando HTTPS na frente. Sem TLS o cookie `Secure` não volta ao navegador e HSTS não protege nada.
-- `FORWARDED_ALLOW_IPS` (consumido pelo `uvicorn --proxy-headers`) deve listar **só** os IPs/redes do proxy real (default `127.0.0.1`). Nunca `*`: qualquer cliente forjaria `X-Forwarded-For` e ganharia um bucket novo de rate limit (AD-032).
+- **TLS é requisito de deployment; a app NUNCA termina TLS**: o repo serve HTTP puro e não embute proxy (nem Caddy nem `cloudflared`). O proxy é externo — Traefik/Caddy do Coolify ou Cloudflare Tunnel. Sem TLS o cookie `Secure` não volta ao navegador e HSTS não protege nada. O caminho de deploy no Coolify está no `README.md` ("Implantar no Coolify") e o contrato de borda é a AD-036.
+- `FORWARDED_ALLOW_IPS` (consumido pelo `uvicorn --proxy-headers`) deve listar **só** os IPs/redes do proxy real. **Nunca `*`**: qualquer cliente forjaria `X-Forwarded-For` e ganharia um bucket novo de rate limit e poluiria os logs. Os três valores válidos: proxy em loopback `127.0.0.1`; Coolify `172.16.0.0/12` (o Traefik tem IP dinâmico na rede do recurso — nunca o IP exato, e não existe env var oficial do Coolify com esse IP); Cloudflare Tunnel `127.0.0.1`. Mecânica do uvicorn: peer TCP fora da lista → `X-Forwarded-For`/`X-Forwarded-Proto` são **ignorados**; peer confiável → caminha o XFF **da direita para a esquerda** e devolve o primeiro host **não** confiável; com `*` devolve o item **mais à esquerda** (forjável pelo cliente). Por isso o proxy sempre **ANEXA** o IP que observou e nunca repassa o XFF cru do cliente. Ver AD-032/AD-036.
 - `DB_SSLMODE` é anexado/sobrescrito na DSN (`app/db/session.py::apply_sslmode`) para Postgres gerenciado (ex.: `require`); não hardcode SSL no código.
 - **Passkey é vinculada ao usuário do pending**: lookup e update usam `credential_id AND user_id` (`PASSKEY_LOOKUP_SQL`/`PASSKEY_UPDATE_SQL`). Sem o predicado de `user_id`, a passkey do atacante verifica contra o challenge da vítima e a sessão sai para a vítima — account takeover. Não simplifique para lookup só por `credential_id`.
 - `GET /users` e `POST /users/enqueue-email` são **superuser-only** (`Depends(require_superuser)` → 403). `DELETE /users/{id}` permite o próprio usuário ou superuser.
@@ -139,10 +139,13 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 ### Imagem, saúde e boot
 
 - O Dockerfile é multi-stage (`build-web` → `build-api` → `runtime`): toolchain e uv ficam só no stage de build; a imagem final copia apenas `/opt/venv` e roda como `app` (uid 10001, sem shell). Não reinstale toolchain na final, não adicione `curl` (o healthcheck usa o `urllib` do venv) e **não troque a base do runtime**: o venv referencia `/usr/local/bin/python3.13` por symlink absoluto.
+- O stage `runtime` **remove o `pip` da base** `python:3.13-slim` (e o wheel do `ensurepip`): o pip vendoriza `msgpack`/`urllib3`/`pkg_resources` com CVE HIGH (4 findings do Trivy no CI) e o venv do `uv` em `/opt/venv` não usa system site-packages.
 - Liveness ≠ readiness: `/api/v1/livez` não toca o banco (liveness decide restart); `/api/v1/healthz` checa o banco e devolve **503** + `degraded`/`db=false` (readiness é para proxy/LB). O HEALTHCHECK do container é o **livez** — se fosse o readiness, uma queda do Postgres reiniciaria um processo saudável.
 - `worker` e `migrate` desligam o healthcheck da imagem (`healthcheck: disable: true`): não servem HTTP.
 - Papéis do entrypoint: `migrate` (one-shot, roda `alembic upgrade head`), `api`, `worker`. api/worker **não** rodam migration (evita corrida). A espera do Postgres usa `pg_isready` (fallback TCP) e **termina com `exit 1`** ao estourar.
-- `API_INTERNAL_PORT` é a porta interna do container; `API_PORT` é a porta publicada no host. uvicorn e healthcheck usam a interna.
+- `API_INTERNAL_PORT` é a porta interna do container; `API_PORT` é a porta publicada no host. A API e o Postgres são publicados **só em `127.0.0.1`** (`127.0.0.1:${API_PORT:-8000}:8000`, `127.0.0.1:${POSTGRES_PORT:-5432}:5432`); o proxy do Coolify fala com o container pelo IP da rede Docker, não pela porta do host.
+- **Compose para deploy**: `postgres`, `migrate`, `api` e `worker` **não têm `profiles:`**. Não reintroduza — o Coolify roda `docker compose up -d` sem `--profile` (bug #6395) e serviço com profile não sobe. Não reintroduza bind-mount de `./apps/api` ou `./scripts` sobre a imagem: a imagem buildada é a fonte da verdade e o bind-mount mascararia o artefato (o compose só mantém o mount read-only de `./scripts/postgres-init` e dos YAMLs de observability).
+- `env_file: .env` é **obrigatório** em `migrate`, `api` e `worker`. Em clone fresco, `just validate-compose` (e o job `compose` do CI) materializam um `.env` temporário a partir do `.env.example` e o removem no fim; para uso real, `cp .env.example .env` e preencha os segredos.
 - O job `docker` do CI **mede o tamanho real da imagem** e falha acima do teto (700 MB): a imagem atual mede **294,7 MB**. A estimativa local (~250–450 MB) era chute; quem manda é o gate.
 
 ### Backup e restauração
@@ -157,7 +160,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - As actions do CI/deploy são pinadas por **commit SHA** (com a versão em comentário); não troque por tag flutuante.
 - Dependabot (`.github/dependabot.yml`) abre PRs semanais para `pip`, `npm`, `github-actions` e `docker`; as instrumentações OTel sobem agrupadas.
 - O gate de auditoria do front no CI é `npm audit --omit=dev --audit-level=moderate` (local: `just web-audit`, `--audit-level=high`).
-- `just ci` roda `just validate-compose`, que interpola `${GRAFANA_ADMIN_PASSWORD:?...}` e **falha sem ela**: rode `GRAFANA_ADMIN_PASSWORD=... just ci`.
+- `just ci` roda `just validate-compose`, que materializa um `.env` a partir do `.env.example` se não houver um e usa `GRAFANA_ADMIN_PASSWORD=validation-only` quando a variável está ausente/vazia: **não** é preciso passá-la na invocação. A interpolação do Compose é global, então o valor de validação existe justamente para o gate passar sem a senha real, que só é exigida ao subir o stack de observability de verdade.
 - O deploy (`.github/workflows/deploy.yml`) publica no GHCR em push na `main`/tag `v*`, gera SBOM SPDX com syft e assina imagem + SBOM com cosign keyless (OIDC), com permissões mínimas (`packages: write`, `id-token: write`).
 
 ### SAST automatizado (Semgrep)
@@ -200,7 +203,7 @@ Use a menor matriz que cubra a mudança e rode `just ci` antes de submeter alter
 | Dependências Python ou npm | `just api-audit` e `just web-audit` |
 | Versão do Node ou toolchain | `mise install` + `mise ls` (fonte única em `.node-version`) + `npm ci` limpo (o `overrides` do `@hookform/resolvers` só se prova com install do zero) |
 | Qualquer alteração de código coberta pelas regras do `semgrep.yml` | `just semgrep` |
-| Dockerfile, compose ou entrypoint | `GRAFANA_ADMIN_PASSWORD=... just validate-compose` + `bash -n scripts/entrypoint.sh` (sem daemon: `docker compose config --quiet`; o build real e o teto de tamanho da imagem são do job `docker` do CI) |
+| Dockerfile, compose ou entrypoint | `just validate-compose` (usa um valor de validação para `GRAFANA_ADMIN_PASSWORD` e materializa um `.env` temporário se preciso) + `bash -n scripts/entrypoint.sh` (sem daemon: `docker compose config --quiet`; o build real e o teto de tamanho da imagem são do job `docker` do CI) |
 | Backup ou restauração | `bash -n scripts/backup.sh scripts/restore.sh scripts/test-restore.sh` + `just test-restore` (exige Postgres + client no PATH) |
 
 `just ci` inclui `just semgrep` (SAST), as auditorias de dependências e `just e2e-mock`; não inclui build do frontend, E2E contra a stack real, build Docker, Trivy nem o teste de restauração; rode esses checks quando a mudança os alcançar. O pre-commit não substitui `just ci`.
