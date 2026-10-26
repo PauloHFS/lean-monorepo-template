@@ -109,6 +109,8 @@ if SPA_DIST.exists():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
+        if full_path == "api" or full_path.startswith("api/"):
+            return JSONResponse(status_code=404, content={"detail": "not found"})
         index = SPA_DIST / "index.html"
         if index.exists():
             return FileResponse(index)

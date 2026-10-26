@@ -1,7 +1,8 @@
 """Engine + sessionmaker async.
 
-`get_db()` é injetado nas dependências do FastAPI e cuida do ciclo de vida:
-yield session → commit se sem erro → rollback se exceção → close sempre.
+`get_db()` é injetado nas dependências do FastAPI: faz yield da session,
+rollback se exceção e close sempre. Não commita — quem chama é responsável
+pelo commit.
 """
 
 from __future__ import annotations

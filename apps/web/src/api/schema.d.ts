@@ -599,7 +599,10 @@ export interface components {
         };
         /** UserOut */
         UserOut: {
-            /** Id */
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
             /**
              * Email

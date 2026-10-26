@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import DB, CurrentUser
 from app.api.schemas import UserOut
@@ -61,25 +62,28 @@ class LoginOut(BaseModel):
 )
 async def register(payload: RegisterIn, session: DB) -> UserOut:
     ph = hash_password(payload.password)
-    row = (
-        (
-            await session.execute(
-                text(
+    try:
+        row = (
+            (
+                await session.execute(
+                    text(
+                        """
+                    INSERT INTO users (email, password_hash, full_name)
+                    VALUES (:email, :ph, :name)
+                    RETURNING id, email, full_name, is_active, is_superuser
                     """
-                INSERT INTO users (email, password_hash, full_name)
-                VALUES (:email, :ph, :name)
-                RETURNING id, email, full_name, is_active, is_superuser
-                """
-                ),
-                {"email": payload.email, "ph": ph, "name": payload.full_name},
+                    ),
+                    {"email": payload.email, "ph": ph, "name": payload.full_name},
+                )
             )
+            .mappings()
+            .first()
         )
-        .mappings()
-        .first()
-    )
-    if not row:
-        raise HTTPException(400, "could not create user")
-    await session.commit()
+        if not row:
+            raise HTTPException(400, "could not create user")
+        await session.commit()
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="email already registered") from None
     return UserOut(**dict(row))
 
 
@@ -157,7 +161,7 @@ async def login(payload: LoginIn, request: Request, response: Response, session:
     return LoginOut(
         requires_2fa=False,
         user=UserOut(
-            id=str(row["id"]),
+            id=row["id"],
             email=row["email"],
             full_name=row["full_name"],
             is_active=row["is_active"],

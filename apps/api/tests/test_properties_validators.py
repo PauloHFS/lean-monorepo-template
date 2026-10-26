@@ -7,6 +7,7 @@ exercitadas aqui (fronteira de confiança).
 from __future__ import annotations
 
 import re
+from uuid import uuid4
 
 import pytest
 from hypothesis import given, settings
@@ -78,7 +79,7 @@ def test_emailstr_rejects_obviously_invalid_strings(value: str) -> None:
 @settings(max_examples=30)
 def test_user_out_accepts_valid_constructor(email: str) -> None:
     user = UserOut(
-        id="u1",
+        id=uuid4(),
         email=email,
         full_name=None,
         is_active=True,
@@ -91,7 +92,7 @@ def test_user_out_accepts_valid_constructor(email: str) -> None:
 @settings(max_examples=10)
 def test_user_out_rejects_invalid_email(email: str) -> None:
     with pytest.raises(ValidationError):
-        UserOut(id="u1", email=email, full_name=None, is_active=True, is_superuser=False)
+        UserOut(id=uuid4(), email=email, full_name=None, is_active=True, is_superuser=False)
 
 
 @given(st.text(alphabet=_ASCII))

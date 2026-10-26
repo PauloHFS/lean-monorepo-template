@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from opentelemetry import trace
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import CursorResult, text
@@ -12,6 +12,7 @@ from sqlalchemy import CursorResult, text
 from app.api.deps import DB, CurrentUser
 from app.api.schemas import UserOut
 from app.core.observability import inject_trace_context
+from app.core.ratelimit import rate_limit
 from app.jobs.tasks.email import send_email
 
 router = APIRouter()
@@ -74,8 +75,13 @@ async def delete_user(user_id: str, user: CurrentUser, session: DB) -> None:
         raise HTTPException(status_code=404, detail="not found")
 
 
-@router.post("/enqueue-email", response_model=EnqueueEmailOut, status_code=202)
-async def enqueue_email(payload: EnqueueEmailIn) -> EnqueueEmailOut:
+@router.post(
+    "/enqueue-email",
+    response_model=EnqueueEmailOut,
+    status_code=202,
+    dependencies=[Depends(rate_limit("users.enqueue_email", limit=5, window_s=60))],
+)
+async def enqueue_email(payload: EnqueueEmailIn, user: CurrentUser) -> EnqueueEmailOut:
     """Enfileira um `email.send` na fila do Procrastinate (mesma task do worker/CLI)."""
     tracer = trace.get_tracer("lean.api")
     with tracer.start_as_current_span("email.enqueue"):

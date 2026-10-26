@@ -7,12 +7,15 @@ gera um OpenAPI limpo e tipos TS coerentes no front.
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class UserOut(BaseModel):
-    id: str
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
     email: EmailStr
     full_name: str | None
     is_active: bool
