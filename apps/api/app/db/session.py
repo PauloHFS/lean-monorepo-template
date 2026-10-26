@@ -30,9 +30,21 @@ def apply_sslmode(dsn: str, sslmode: str | None) -> str:
     return urlunsplit(parts._replace(query=urlencode(query)))
 
 
+def _api_dsn() -> str:
+    """DSN do engine da API, com `db_sslmode` só no caminho direto.
+
+    O pgbouncer local não termina TLS: aplicar `DB_SSLMODE=require` ao DSN do
+    pooler faria o asyncpg abrir TLS contra o pgbouncer e falhar no boot. Se o
+    DSN do pooler já trouxer `sslmode`, ele é respeitado (é do operador).
+    """
+    if settings.database_url_pooler:
+        return settings.database_url_api
+    return apply_sslmode(settings.database_url_api, settings.db_sslmode)
+
+
 def _make_engine() -> AsyncEngine:
     return create_async_engine(
-        apply_sslmode(settings.database_url_async, settings.db_sslmode),
+        _api_dsn(),
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
         pool_timeout=settings.db_pool_timeout,

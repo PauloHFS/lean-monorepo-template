@@ -1,7 +1,7 @@
 # =============================================================================
 # Stack do lean monorepo.
 # Perfis:
-#   - default: postgres + migrate + api + worker (a stack inteira)
+#   - default: postgres + pgbouncer + migrate + api + worker (a stack inteira)
 #   - dev:     mailpit (SMTP de captura + web UI), só quando pedido
 #   - observability: otel-collector + tempo + prometheus + grafana
 # Serviços core SEM profile: o Coolify roda `docker compose up -d` sem
@@ -33,13 +33,62 @@ services:
       timeout: 3s
       retries: 10
 
+  # ---- pgbouncer: pooler de conexao da API (AD-037) -----------------------
+  # Sem `profiles:` pelo mesmo motivo dos demais servicos core (bug #6395 do
+  # Coolify). Fica sempre no ar, mas so tem efeito quando a API recebe
+  # DATABASE_URL_POOLER; sem ela, a API fala direto no Postgres.
+  # Somente a API usa o pooler: worker (LISTEN/NOTIFY) e migrate (DDL) precisam
+  # de conexao direta e persistente.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.26.1-p0
+    container_name: lm_pgbouncer
+    restart: unless-stopped
+    # Sem porta publicada no host: a API fala pela rede Docker e o console
+    # admin nao sai do container.
+    environment:
+      # Mesmas credenciais do Postgres: o auth_file aceita senha em texto e o
+      # proprio pgbouncer faz o SCRAM na conexao com o servidor.
+      DB_USER: ${POSTGRES_USER:-app}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-app}
+      # Porta interna do pgbouncer (a default da imagem, 5432, colidiria
+      # conceitualmente com o Postgres).
+      LISTEN_PORT: 6432
+      AUTH_TYPE: scram-sha-256
+      ADMIN_USERS: ${POSTGRES_USER:-app}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 25
+      MIN_POOL_SIZE: 2
+      RESERVE_POOL_SIZE: 5
+      RESERVE_POOL_TIMEOUT: 5
+      MAX_DB_CONNECTIONS: 50
+      QUERY_WAIT_TIMEOUT: 60
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits
+      # Explicito (nao depender do default da imagem): e o que faz o asyncpg
+      # funcionar em transaction mode.
+      MAX_PREPARED_STATEMENTS: 200
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # `$$` escapa a interpolacao do Compose: as vars sao lidas no container.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U \"$$DB_USER\" -d \"$$DB_NAME\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # ---- Postgres gerenciado (Neon/RDS/Cloud SQL) ---------------------------
   # Para trocar por um Postgres externo, edite este arquivo:
-  #   1. remova o serviço `postgres` inteiro (as linhas acima);
-  #   2. remova `depends_on: postgres` (`condition: service_healthy`) de
-  #      `migrate`, `api` e `worker` — condicional não existe no compose;
+  #   1. remova os serviços `postgres` e `pgbouncer` (as linhas acima);
+  #   2. remova `depends_on: postgres`/`pgbouncer` (`condition: service_healthy`)
+  #      de `migrate`, `api` e `worker`, e `DATABASE_URL_POOLER` do `api`;
   #   3. remova `POSTGRES_HOST: postgres` do `environment:` dos três (ele
   #      vence o `env_file`) e defina `DATABASE_URL` + `DB_SSLMODE=require`.
+  # Se quiser manter um pooler com Postgres gerenciado, aponte `DB_HOST` do
+  # pgbouncer para o host externo (e use TLS upstream via `SERVER_TLS_SSLMODE`).
   # Só `citext` é exigida (a migration cria). As extensões de
   # `scripts/postgres-init` (postgis/vector/ltree/...) não existem num PG
   # gerenciado e nada no app as usa hoje. Passo a passo: README,
@@ -98,12 +147,17 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
       SPA_DIST_PATH: /app/apps/web/dist
+      # Vazio = DSN direto (POSTGRES_*/DATABASE_URL). Defina no .env para usar
+      # o pooler: postgresql+asyncpg://app:app@pgbouncer:6432/app
+      DATABASE_URL_POOLER: ${DATABASE_URL_POOLER:-}
     ports:
       # publicado só em loopback — o proxy (Coolify) fala com o container pelo
       # IP da rede Docker; em 0.0.0.0 a origem burlaria o proxy
       - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully

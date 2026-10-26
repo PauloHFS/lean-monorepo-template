@@ -289,17 +289,35 @@ jobs:
           done
           curl -fsS http://127.0.0.1:8000/api/v1/healthz
           echo
-          # migration aplicada de verdade
+          # migration aplicada de verdade (psql direto no container postgres:
+          # o pooler nao serve DDL/sessao persistente)
           docker compose exec -T postgres psql -U app -d app \
             -c 'select version_num from alembic_version'
           # worker vivo
           docker compose ps --services --filter status=running | grep -qx worker
+          # pgbouncer no ar e a rota do pooler responde (o psql esta no
+          # container postgres; a senha vem do proprio container)
+          docker compose ps --services --filter status=running | grep -qx pgbouncer
+          docker compose exec -T postgres sh -c \
+            'PGPASSWORD="$POSTGRES_PASSWORD" psql -h pgbouncer -p 6432 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select 1"'
           docker compose down -v
 
       - name: Trivy (vulns na imagem)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: lean-monorepo:ci
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      # O pooler tambem e superficie de ataque (CVE-2026-107350 em <=1.25.x e
+      # o motivo do pin >=1.26.1). Registro publico: sem credencial. A imagem
+      # ja foi puxada pelo `docker compose up` do passo anterior.
+      - name: Trivy (vulns na imagem do pgbouncer)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: edoburu/pgbouncer:v1.26.1-p0
           format: table
           exit-code: "1"
           severity: CRITICAL,HIGH

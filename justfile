@@ -186,6 +186,10 @@ mail:
 psql:
     {{compose_env}} docker compose exec -T postgres psql -U $POSTGRES_USER -d $POSTGRES_DB
 
+# psql através do pooler (pgbouncer). Admin/sessão continuam no `psql` direto.
+psql-pooler:
+    {{compose_env}} docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -h pgbouncer -p 6432 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+
 # Lista extensões instaladas
 psql-extensions:
     {{compose_env}} docker compose exec -T postgres psql -U $POSTGRES_USER -d $POSTGRES_DB -c "\dx"

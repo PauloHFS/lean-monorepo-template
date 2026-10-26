@@ -46,7 +46,10 @@ class Settings(BaseSettings):
     postgres_user: str = "app"
     postgres_password: str = "app"
     database_url: str | None = None
-    # Anexado à DSN (query string) quando definido; ex.: "require".
+    # DSN do pooler (pgbouncer). Vazio = a API fala direto no Postgres.
+    # Não recebe `db_sslmode`: o pooler local não tem certificado TLS.
+    database_url_pooler: str | None = None
+    # Anexado à DSN direta (query string) quando definido; ex.: "require".
     db_sslmode: str | None = None
 
     db_pool_size: int = 10
@@ -128,6 +131,15 @@ class Settings(BaseSettings):
                 path=self.postgres_db,
             )
         )
+
+    @property
+    def database_url_api(self) -> str:
+        """DSN do engine da API: o pooler quando configurado, senão o direto.
+
+        `DATABASE_URL_POOLER` não passa por `apply_sslmode`: o pgbouncer local
+        não tem certificado. Se o DSN já trouxer `sslmode`, ele é respeitado.
+        """
+        return self.database_url_pooler or self.database_url_async
 
     @computed_field  # type: ignore[prop-decorator]
     @property

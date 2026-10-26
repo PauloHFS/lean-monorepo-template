@@ -19,7 +19,7 @@ pgcrypto, citext) as the single source of truth for everything except the front.
 `gen_random_uuid()` (built-in desde o PG13), então `uuid-ossp` não entra na baseline (AD-033).
 
 **Consequences**:
-- One connection pool, one backup, one set of credentials.
+- One connection pool (opcionalmente atrás de um pgbouncer, AD-037), one backup, one set of credentials.
 - Fila (Procrastinate) no próprio Postgres: jobs são reivindicados com
   `SELECT … FOR UPDATE SKIP LOCKED`, ACID com o resto do app.
 - Sessions are server-side rows (`sessions.token_hash` + `sha256(token)` in cookie) — instant
@@ -661,9 +661,10 @@ truncado passava — e **não existia** `restore.sh` nem teste de restauração.
 - **Boot**: o entrypoint ganha o papel `migrate` (one-shot); api e worker passam a
   depender de `service_completed_successfully` — sem corrida de migrations. A
   espera do Postgres usa `pg_isready` (fallback TCP) e **termina com exit 1** ao
-  estourar. `API_INTERNAL_PORT` é a porta interna do container; `API_PORT` é a
-  porta publicada no host. O worker ganhou retry com backoff na abertura do app
-  (`tenacity`, que já era dependência e não era usado).
+  estourar. A API também depende do `pgbouncer` saudável (AD-037), mesmo quando
+  `DATABASE_URL_POOLER` está vazio. `API_INTERNAL_PORT` é a porta interna do
+  container; `API_PORT` é a porta publicada no host. O worker ganhou retry com
+  backoff na abertura do app (`tenacity`, que já era dependência e não era usado).
 - **Backup com prova**: `pg_restore --list` valida o dump (não só o tamanho),
   sidecar `.sha256`, `flock` contra execuções sobrepostas (com degradação no
   macOS, que não tem `flock`), modo local quando não há bucket (mantém o dump) e
@@ -1023,8 +1024,10 @@ pedir para esquecer.
 - `password_min_length` continua com o `field_validator` próprio (1..72): a política de
   senha também é validada no boot, com mensagem acionável.
 - `db_sslmode` entra em `Settings`; `app/db/session.py::apply_sslmode` anexa ou
-  sobrescreve `sslmode` na query string da DSN, preservando os outros parâmetros.
-- `.env.example` documenta o contrato de prod e o `DB_SSLMODE`.
+  sobrescreve `sslmode` na query string da **DSN direta**, preservando os outros
+  parâmetros. O DSN do pooler (`DATABASE_URL_POOLER`) não passa por ele (AD-037).
+- `.env.example` documenta o contrato de prod, o `DB_SSLMODE` e o
+  `DATABASE_URL_POOLER` (vazio = sem pooler).
 
 **Consequences**:
 - Config impossível falha **alto e no boot**, com a lista completa de problemas — não é
@@ -1326,7 +1329,7 @@ AD-032 (proxy confiável) continuam vigentes; esta ADR as conecta ao caminho de 
   campo de conta); o **rate limit da aplicação** (AD-009/AD-031) é o principal.
 
 **Consequences**:
-- `postgres`, `migrate`, `api` e `worker` **sem `profiles:`**: o Coolify roda
+- `postgres`, `pgbouncer`, `migrate`, `api` e `worker` **sem `profiles:`**: o Coolify roda
   `docker compose up -d` sem `--profile` (bug #6395) e serviço com profile não sobe.
 - `api` e `postgres` publicam só em loopback (`127.0.0.1:${API_PORT:-8000}:8000`,
   `127.0.0.1:${POSTGRES_PORT:-5432}:5432`); a internet fala com o proxy, não com o container.
@@ -1382,6 +1385,85 @@ AD-032 (proxy confiável) continuam vigentes; esta ADR as conecta ao caminho de 
 5. IP real refletido: com `FORWARDED_ALLOW_IPS` correto, `request.client.host` (log/rate
    limit) mostra o IP do visitante, não o da borda; com o valor errado, muda para o da borda.
 6. Cookie de sessão sai com `Secure` e volta no navegador sob HTTPS.
+
+---
+
+## AD-037 · Pooler de conexão (pgbouncer) só para a API
+
+**Status**: current.
+
+**Context**: cada request da API abre uma session no pool do SQLAlchemy, mas o
+Postgres impõe um teto de conexões e cada conexão custa memória. Sob concorrência
+HTTP, o pool da aplicação sozinho não evita que picos multipliquem conexões por
+processo/container. Um pooler na frente do Postgres multiplexa clientes em poucas
+conexões de servidor. A escolha precisa conviver com as restrições do
+Procrastinate (conexão persistente + `LISTEN/NOTIFY` + `FOR UPDATE SKIP LOCKED`) e
+do Alembic (DDL), que **não** funcionam em `pool_mode=transaction`.
+
+**Decision**:
+- O serviço `pgbouncer` entra no compose **sem `profiles:`** (o Coolify roda
+  `docker compose up -d` sem `--profile`, bug #6395), depois do `postgres` e antes do
+  `migrate`, com `restart: unless-stopped` e `depends_on: postgres` saudável. Fica
+  **sempre no ar**, mas **sem efeito** enquanto `DATABASE_URL_POOLER` não for
+  definido: sem a env a API fala direto no Postgres (o comportamento anterior).
+- **Só a API usa o pooler.** `migrate` (Alembic, DDL) e `worker` (Procrastinate)
+  continuam com o DSN direto `POSTGRES_*`/`DATABASE_URL`. A API também abre o
+  Procrastinate (`defer_async` em `app/main.py`), e por isso o `POSTGRES_HOST`
+  dela continua `postgres`: a `database_url_procrastinate` deriva de `POSTGRES_*`.
+- A imagem é **`edoburu/pgbouncer:v1.26.1-p0`** (pinada; nunca `latest`). O
+  upstream precisa ser **>= 1.26.1** por causa do **CVE-2026-107350** (bypass de
+  autenticação SCRAM em <= 1.25.x). `bitnami/pgbouncer` está descontinuada e não é
+  usada. A imagem gera `pgbouncer.ini`/`userlist.txt` no boot a partir das envs
+  `DB_*`, `LISTEN_PORT`, `AUTH_TYPE`, `POOL_MODE` etc.
+- Porta interna **6432** (`LISTEN_PORT`), não publicada no host; o console admin
+  (`ADMIN_USERS`) não é exposto. Credenciais são as mesmas do Postgres (`DB_USER`,
+  `DB_PASSWORD`, `DB_HOST=postgres`, `DB_NAME`): o `auth_file` aceita a senha em
+  texto e o pgbouncer faz o SCRAM com o servidor. Nenhum segredo novo.
+- Knobs para 4 vCPU/8 GB: `pool_mode=transaction`, `max_client_conn=1000`,
+  `default_pool_size=25`, `min_pool_size=2`, `reserve_pool_size=5`,
+  `reserve_pool_timeout=5`, `max_db_connections=50` (folga para worker/migrate
+  diretos), `query_wait_timeout=60`, `ignore_startup_parameters=extra_float_digits`,
+  `auth_type=scram-sha-256` e `max_prepared_statements=200` **explícito** — é o que
+  faz o asyncpg funcionar em transaction mode; não dependa do default da imagem.
+- O DSN separado é `Settings.database_url_pooler` (env `DATABASE_URL_POOLER`) e a
+  propriedade `Settings.database_url_api` devolve o pooler quando setado, senão o
+  DSN direto. O engine da API usa `database_url_api`; `migrations/env.py` e
+  `jobs/app.py` continuam em `database_url_async`/`database_url_procrastinate`.
+- **TLS**: `apply_sslmode` só atua na DSN **direta**. Aplicar `DB_SSLMODE=require`
+  ao DSN do pooler faria o asyncpg abrir TLS contra um pgbouncer local sem
+  certificado e falhar no boot. Se o operador colocar `sslmode` no próprio
+  `DATABASE_URL_POOLER`, ele é respeitado (o DSN é dele) — não é injetado.
+- O CI prova os dois caminhos: readiness/migration/worker no caminho direto e
+  `psql -h pgbouncer -p 6432` (rodando no container `postgres`) no caminho do pooler,
+  além de `pgbouncer` em `docker compose ps --services --filter status=running`. A
+  imagem do pgbouncer também entra no scan do Trivy.
+
+**Incompatibilidades do `pool_mode=transaction`** (o motivo do bypass):
+- `LISTEN`/`NOTIFY` dependem da conexão de sessão: a notificação nunca chega ao
+  cliente. É o mecanismo que o worker do Procrastinate usa para acordar — daí o
+  worker ficar direto.
+- Estado de sessão (`SET`, `search_path`, `application_name`, parâmetros de sessão)
+  vaza ou se perde entre transações; advisory locks de escopo de sessão e `WITH
+  HOLD` cursors também não sobrevivem. Use só o que for transacional.
+- Prepared statements: o suporte a named prepared statements existe desde o
+  pgbouncer 1.24 e é habilitado por `max_prepared_statements`; com ele explícito o
+  asyncpg funciona. Sem ele (ou com pgbouncer antigo) o asyncpg falha em transaction
+  mode.
+- DDL do Alembic não deve ir pelo pooler por causa de locks/estado de sessão e do
+  contrato de migration aplicada no banco real.
+
+**Consequences**:
+- A API ganha um hop a mais; worker e migrate seguem diretos e continuam
+  consumindo conexões do Postgres (o `max_db_connections=50` deixa folga).
+- Sem `DATABASE_URL_POOLER`, nada muda no runtime, mas a API passa a depender do
+  healthcheck do `pgbouncer` para subir. É o custo de ter o serviço sempre no ar
+  no Coolify.
+- Dois caminhos de conexão para diagnosticar: `just psql` (admin/sessão, direto) e
+  `just psql-pooler` (rota da aplicação). `test-restore` e migrations permanecem
+  diretos.
+- O pgbouncer local não usa TLS upstream (Postgres do compose); num Postgres
+  gerenciado o pooler precisa de `SERVER_TLS_SSLMODE`/CA, não de `DB_SSLMODE` no
+  DSN do cliente.
 
 ---
 
