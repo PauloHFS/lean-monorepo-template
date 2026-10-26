@@ -79,6 +79,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - Nunca concatene entrada do usuário em SQL. Isso evita SQL Injection mesmo nos pontos de acesso SQL explícito.
 - Modelos ORM (`Mapped[]`) servem ao schema e ao Alembic; queries de runtime servem ao Core.
 - Gere migrations com `just api-revision`, revise o resultado e não edite uma migration já aplicada.
+- O compose usa a imagem oficial **`postgres:18-alpine`** (arm64 nativo): no PG18 o `PGDATA` é `/var/lib/postgresql/18/docker` e o volume monta `/var/lib/postgresql` (não `/var/lib/postgresql/data`). As contrib (`citext`, `pg_trgm`, `ltree`, `pgcrypto`...) vêm na imagem; `postgis`/`vector`/`pg_cron` **não** vêm e são opt-in por projeto (imagem própria — ex.: `FROM postgres:18` + `postgresql-18-postgis-3` do PGDG — ou provider gerenciado). O bloco `postgis` do init continua lá porque é tolerante: só cria a extensão quando a imagem a tiver. Volume de PG16/17 não sobe no PG18 (dump/restore + volume novo).
 - A baseline **não exige `uuid-ossp`**: UUIDs usam `gen_random_uuid()` (built-in desde o PG13). `pg_cron` é **opcional**: só é criada se `pg_available_extensions` a oferecer e os jobs de cleanup só são agendados se ela estiver instalada — em RDS/Aurora/Cloud SQL sem pg_cron o schema sobe e a limpeza periódica fica com o operador. `citext` **continua obrigatória** (coluna `users.email`).
 
 ### Filas e jobs

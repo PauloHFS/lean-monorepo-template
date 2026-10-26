@@ -10,12 +10,12 @@ permissions:
 
 jobs:
   restore-test:
-    name: backup -> restore -> verify (postgres 16)
+    name: backup -> restore -> verify (postgres 18)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
       postgres:
-        image: postgis/postgis:16-3.4
+        image: postgres:18-alpine
         env:
           POSTGRES_DB: app
           POSTGRES_USER: app
@@ -39,16 +39,17 @@ jobs:
           persist-credentials: false
 
       # pg_dump/pg_restore/psql ficam no runner; o service container so roda o servidor.
-      # Cliente fixado na MESMA major do servidor (postgis 16 -> client 16): um client
-      # mais antigo recusa o dump com "server version mismatch".
-      - name: Instalar client do Postgres 16
+      # Cliente fixado na MESMA major do servidor (18 -> client 18): um client
+      # mais antigo recusa o dump com "server version mismatch". O client 18 nao
+      # esta no repo do Ubuntu; vem do PGDG (apt.postgresql.org).
+      - name: Instalar client do Postgres 18
         run: |
           sudo apt-get update
           sudo apt-get install -y curl ca-certificates gnupg
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/pgdg.gpg
           echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
-          sudo apt-get install -y postgresql-client-16
+          sudo apt-get install -y postgresql-client-18
 
       - name: Backup -> restore -> verify
         run: bash scripts/test-restore.sh

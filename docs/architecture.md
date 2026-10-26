@@ -10,12 +10,17 @@
 
 **Status**: current.
 
-**Context**: The template needs cache, queues, sessions, geo, full-text, embeddings, and
-hierarchies. Each could be a separate service (Redis, Elasticsearch, Neo4j, Pinecone…).
-A monolith template shouldn't ship five different pieces of infra to be "complete".
+**Context**: The template needs cache, queues, sessions, full-text and hierarchies. Each could
+be a separate service (Redis, Elasticsearch, Neo4j…). Geo and embeddings are possible but are
+not required by the template. A monolith template shouldn't ship five different pieces of
+infra to be "complete".
 
-**Decision**: Use Postgres + extensions (PostGIS, pgvector, ltree, pg_trgm, btree_gist,
-pgcrypto, citext) as the single source of truth for everything except the front. UUIDs usam
+**Decision**: Use PostgreSQL 18 (official `postgres:18-alpine` image in the compose) as the
+single source of truth for everything except the front. The schema requires only **`citext`**
+(created by the migration). The official image already ships the contrib extensions
+(`pg_trgm`, `unaccent`, `ltree`, `btree_gist`, `pgcrypto`), created by
+`scripts/postgres-init`; **PostGIS, pgvector and pg_cron do not come in it** and are opt-in per
+project (managed provider or a custom image — see README, "Extensões opt-in"). UUIDs usam
 `gen_random_uuid()` (built-in desde o PG13), então `uuid-ossp` não entra na baseline (AD-033).
 
 **Consequences**:
@@ -1186,6 +1191,13 @@ então o schema é impossível sem a extensão.
   ela a migration imprime um aviso e segue.
 - `downgrade()` só faz `cron.unschedule` quando a extensão está instalada.
 - `citext` continua obrigatória (`CREATE EXTENSION IF NOT EXISTS citext` sem guarda).
+- O compose usa a imagem oficial `postgres:18-alpine` (arm64 nativo). `postgis` continua no
+  bootstrap apenas porque o bloco é tolerante: só cria a extensão se a imagem a tiver. A
+  imagem oficial não a tem, então PostGIS/pgvector/pg_cron ficam opt-in por projeto (provider
+  gerenciado ou imagem própria); a antiga `postgis/postgis` era amd64-only (emulada em arm64).
+- No PG18 o `PGDATA` vive em `/var/lib/postgresql/18/docker` e o volume é
+  `/var/lib/postgresql`; o mount `pgdata:/var/lib/postgresql` reflete isso (majors 16/17
+  usavam `.../data`).
 
 **Consequences**:
 - O schema sobe em RDS/Aurora/Cloud SQL sem pg_cron; a limpeza periódica passa a ser
@@ -1194,6 +1206,8 @@ então o schema é impossível sem a extensão.
   explícito.
 - `citext` permanece um requisito duro do schema, documentado no README/AGENTS.
 - Bancos existentes não precisam remover `uuid-ossp`; a mudança só vale para instalações novas.
+- Volume de PG16/17 **não** é reutilizável no PG18 por causa do novo `PGDATA`: instalações
+  existentes precisam de dump/restore (o caminho lógico do repo) e de um volume novo.
 
 ---
 

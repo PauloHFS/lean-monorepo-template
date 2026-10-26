@@ -1,6 +1,6 @@
 # Tuning e escala
 
-Guia de operação para quem já colocou o template em produção e precisa decidir **quando e o que** aumentar. O alvo é o deploy padrão: 1 VPS com Coolify, PostgreSQL 16 no mesmo host, `api` + `worker` + `migrate` em Compose. A aplicação é stateless (a sessão é uma linha na tabela `sessions` e o cookie carrega só o token opaco), então escalar horizontalmente não exige mudança de código nem sticky session — o que muda é o desenho do deploy.
+Guia de operação para quem já colocou o template em produção e precisa decidir **quando e o que** aumentar. O alvo é o deploy padrão: 1 VPS com Coolify, PostgreSQL 18 no mesmo host, `api` + `worker` + `migrate` em Compose. A aplicação é stateless (a sessão é uma linha na tabela `sessions` e o cookie carrega só o token opaco), então escalar horizontalmente não exige mudança de código nem sticky session — o que muda é o desenho do deploy.
 
 **Fora de escopo**: PITR (a Coolify não oferece; o caminho confiável de restore é o dump lógico do repo), multi-engine (Postgres é a única fonte de estado, por AD-001), multi-node/Kubernetes e tuning interno do planner além dos knobs abaixo. Números de capacidade são **estimativas** para dimensionar, não benchmark assinado: meça no seu workload antes de comprar hardware.
 
@@ -60,7 +60,7 @@ O que cada um faz, em uma linha:
 
 ```yaml
   postgres:
-    image: postgis/postgis:16-3.4
+    image: postgres:18-alpine
     command:
       - postgres
       - -c

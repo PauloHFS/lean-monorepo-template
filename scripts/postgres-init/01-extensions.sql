@@ -2,11 +2,12 @@
 -- Bootstrap de extensões. Roda na primeira inicialização do cluster
 -- (via /docker-entrypoint-initdb.d). Idempotente e tolerante: cada extensão é
 -- criada num bloco próprio. Se a imagem não trouxer os arquivos de controle
--- (ex.: `vector` no postgis/postgis, `pg_cron` sem a extensão), o bloco emite
--- NOTICE e o script segue — sem abortar as extensões seguintes.
+-- (ex.: `postgis`/`vector`/`pg_cron` na postgres:18-alpine), o bloco emite
+-- NOTICE e o script segue — sem abortar as extensões seguintes. `citext`
+-- (exigida pela migration) e as demais contrib abaixo vêm na imagem oficial.
 -- =============================================================================
 
--- Geoespacial
+-- Geoespacial (opt-in: só é criada se a imagem tiver PostGIS; a oficial não tem)
 DO $$ BEGIN CREATE EXTENSION IF NOT EXISTS postgis; EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'postgis indisponível nesta imagem: %', SQLERRM; END $$;
 
 -- Full-text e busca trigram

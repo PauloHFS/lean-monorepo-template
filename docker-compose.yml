@@ -11,7 +11,12 @@ name: lean-monorepo
 
 services:
   postgres:
-    image: postgis/postgis:16-3.4
+    # Imagem oficial (arm64 nativo): a antiga postgis/postgis:16-3.4 era amd64-only.
+    # Nada no app usa PostGIS hoje (a extensão segue opt-in via imagem própria).
+    # No PG18 o PGDATA vive em
+    # /var/lib/postgresql/18/docker e o VOLUME é /var/lib/postgresql (por isso o
+    # mount abaixo não leva o sufixo /data das majors 16/17).
+    image: postgres:18-alpine
     container_name: lm_postgres
     restart: unless-stopped
     # Defaults (app/app) são só para dev local; sobrescreva em qualquer ambiente real.
@@ -25,7 +30,7 @@ services:
       # internet não fala com o Postgres
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
       - ./scripts/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}"]
@@ -89,10 +94,10 @@ services:
   #      vence o `env_file`) e defina `DATABASE_URL` + `DB_SSLMODE=require`.
   # Se quiser manter um pooler com Postgres gerenciado, aponte `DB_HOST` do
   # pgbouncer para o host externo (e use TLS upstream via `SERVER_TLS_SSLMODE`).
-  # Só `citext` é exigida (a migration cria). As extensões de
-  # `scripts/postgres-init` (postgis/vector/ltree/...) não existem num PG
-  # gerenciado e nada no app as usa hoje. Passo a passo: README,
-  # "Trocar para Postgres gerenciado".
+  # Só `citext` é exigida (a migration cria). As extensões contrib de
+  # `scripts/postgres-init` (pg_trgm/ltree/pgcrypto/...) já vêm na imagem
+  # oficial; `vector` e `pg_cron` não vêm e nada no app as usa hoje.
+  # Passo a passo: README, "Trocar para Postgres gerenciado".
 
   # ---- Mailpit: SMTP server com web UI para dev/test ----------------------
   # Captura emails enviados pelo SmtpProvider. Ver em http://localhost:8025
