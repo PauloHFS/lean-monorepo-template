@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, cast
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from opentelemetry import trace
@@ -69,8 +70,8 @@ async def get_me(user: CurrentUser) -> UserOut:
 
 
 @router.delete("/{user_id}", status_code=204, response_model=None)
-async def delete_user(user_id: str, user: CurrentUser, session: DB) -> None:
-    if str(user.id) != user_id and not user.is_superuser:
+async def delete_user(user_id: UUID, user: CurrentUser, session: DB) -> None:
+    if user.id != user_id and not user.is_superuser:
         raise HTTPException(status_code=403, detail="forbidden")
     res = cast(
         CursorResult[Any],

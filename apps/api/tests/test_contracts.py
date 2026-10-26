@@ -42,3 +42,9 @@ def test_openapi_login_200_has_usable_properties() -> None:
 def test_openapi_ok_out_has_bool_property() -> None:
     ok_out = _openapi_schemas()["OkOut"]
     assert ok_out["properties"] == {"ok": {"title": "Ok", "type": "boolean"}}
+
+
+def test_openapi_delete_user_path_param_is_uuid() -> None:
+    param = app.openapi()["paths"]["/api/v1/users/{user_id}"]["delete"]["parameters"][0]
+    assert param["in"] == "path"
+    assert param["schema"]["format"] == "uuid"
