@@ -49,15 +49,14 @@ def test_wrong_password_is_rejected(plain: str, wrong: str) -> None:
     assert security.verify_password(wrong, security.hash_password(plain)) is False
 
 
-@given(
-    st.text(alphabet=_ASCII, min_size=72, max_size=120),
-    st.text(alphabet=_ASCII, min_size=0, max_size=20),
-)
+@given(st.text(alphabet=_ASCII, min_size=73, max_size=120))
 @settings(max_examples=10, deadline=None)
-def test_bcrypt_only_compares_first_72_bytes(plain: str, suffix: str) -> None:
-    # Limite conhecido do bcrypt: o app trunca em `_BCRYPT_MAX_PASSWORD_BYTES`
-    # (72), então qualquer cauda diferente depois do 72º byte é ignorada.
-    assert security.verify_password(plain[:72] + suffix, security.hash_password(plain)) is True
+def test_bcrypt_rejects_passwords_above_72_bytes(plain: str) -> None:
+    # O limite do bcrypt é explícito: hash rejeita >72 bytes e verify devolve
+    # False (nunca trunca em silêncio).
+    with pytest.raises(ValueError):
+        security.hash_password(plain)
+    assert security.verify_password(plain, security.hash_password(plain[:72])) is False
 
 
 @given(st.text(alphabet=_ASCII, max_size=20))

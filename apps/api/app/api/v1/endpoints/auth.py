@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import AfterValidator, BaseModel, EmailStr, Field
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
@@ -25,23 +27,33 @@ from app.core.security import (
 router = APIRouter()
 
 
+def _max_72_utf8_bytes(value: str) -> str:
+    """bcrypt só considera 72 bytes; rejeitar aqui evita truncamento silencioso."""
+    if len(value.encode("utf-8")) > 72:
+        raise ValueError("senha deve ter no máximo 72 bytes UTF-8")
+    return value
+
+
+# min_length vem de settings (não hardcode) para não divergir de hash_password;
+# max_length=72 em caracteres é o teto do bcrypt, e o AfterValidator garante o
+# teto em BYTES (um caractere multibyte pode ocupar mais de um byte).
+# Settings valida password_min_length <= 72 no boot (fail-fast).
+Password = Annotated[
+    str,
+    Field(min_length=settings.password_min_length, max_length=72),
+    AfterValidator(_max_72_utf8_bytes),
+]
+
+
 class RegisterIn(BaseModel):
     email: EmailStr
-    # min_length vem de settings (não hardcode) para não divergir de hash_password;
-    # max_length=72 em CARACTERES porque o repo trunca em 72 BYTES e o bcrypt 5.x
-    # rejeita acima disso — aceitar mais geraria o hash de uma senha que só existe
-    # truncada. Settings valida password_min_length <= 72 no boot (fail-fast),
-    # então o Field é construível.
-    password: str = Field(min_length=settings.password_min_length, max_length=72)
+    password: Password
     full_name: str | None = Field(default=None, max_length=200)
 
 
 class LoginIn(BaseModel):
     email: EmailStr
-    # SEM max_length de propósito: usuários com senha >72 chars criados antes
-    # desta validação precisam continuar logando (verify_password trunca nos
-    # dois lados). Adicionar max_length aqui quebraria login legado.
-    password: str = Field(min_length=settings.password_min_length)
+    password: Password
 
 
 class LoginOut(BaseModel):

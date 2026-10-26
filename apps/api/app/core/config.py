@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     @field_validator("password_min_length")
     @classmethod
     def _validate_password_min_length(cls, value: int) -> int:
-        """Fail-fast: RegisterIn usa max_length=72 e o repo trunca em 72 BYTES.
+        """Fail-fast: o schema de senha rejeita acima de 72 bytes.
 
         O bcrypt 5.x rejeita senhas acima disso. Um mínimo acima do teto geraria
         um schema impossível e quebraria o import do app; falhar aqui dá uma

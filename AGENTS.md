@@ -46,8 +46,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 ### Validação de entrada (schemas)
 
 - Todo schema de entrada declara suas constraints no Pydantic v2 (`Field(min_length=..., max_length=..., pattern=...)`); paginação usa `Query(ge=..., le=...)`. A fronteira é o backend — o Zod do front é conveniência, não garantia.
-- `RegisterIn.password` usa `settings.password_min_length` como fonte única do mínimo, com `max_length=72` (o **repo** trunca em 72 **bytes**; o bcrypt 5.x rejeita acima de 72, não trunca).
-- `LoginIn.password` fica **sem** `max_length`: o truncamento acontece nos dois lados, então limitar o login quebraria usuários legados com senha >72 chars. Endurecer a entrada viraria um outage.
+- `RegisterIn.password` e `LoginIn.password` usam o tipo `Password` de `endpoints/auth.py`: `min_length` vem de `settings.password_min_length`, `max_length=72` e um `AfterValidator` rejeita senhas com mais de 72 **bytes UTF-8**. Não há exceção para login legado: o bcrypt 5.x rejeita >72 bytes, então aceitar mais só adiaria o erro para o hash.
 - `TwoFactorVerifyIn.code` aceita TOTP (6 dígitos) **ou** recovery code (10 chars): não aplique pattern de 6 dígitos ali. O `^\d{6}$` é só do `TotpConfirmIn` (confirmação de setup).
 - Entrada inválida responde **422**, não 401. Constraint não aparece no `schema.d.ts` (o openapi-typescript descarta `minLength`/`maxLength`/`pattern` de campo escalar): ela vale no servidor, e o `check-schema` continua sendo o gate de contrato.
 

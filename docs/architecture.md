@@ -64,8 +64,9 @@ lib via `SchemaManager.apply_schema()` in the migration — no duplication.
 **Context**: passlib 1.7.4 (latest) is in maintenance and is incompatible with bcrypt ≥ 4.1
 (`AttributeError: module 'bcrypt' has no '__about__'`, plus the silent 72-byte truncation).
 
-**Decision**: Use `bcrypt` library directly. Truncate passwords to 72 bytes explicitly
-before hashing (per bcrypt spec) to avoid divergence between hash and check on multibyte chars.
+**Decision**: Use `bcrypt` library directly. Reject passwords above 72 **UTF-8 bytes**
+at the schema (`Password` type) and at the security boundary (`_to_bytes` raises), so a
+multibyte password can never be silently truncated into a different secret.
 
 **Consequences**:
 - One library instead of two.
@@ -587,13 +588,14 @@ passaria.
 - Todo schema de entrada declara suas constraints em Pydantic v2
   (`Field(min_length=..., max_length=..., pattern=...)`), e paginação usa
   `Query(ge=..., le=...)`.
-- `RegisterIn.password` = `Field(min_length=settings.password_min_length,
-  max_length=72)`: a fonte do mínimo é o `Settings` (não um literal) e o teto de
-  72 existe porque o bcrypt trunca em 72 **bytes**.
-- `LoginIn.password` fica **sem** `max_length`. O truncamento do bcrypt acontece
-  nos dois lados, então uma senha de 100 chars gravada antes desta mudança
-  continua verificando; limitar o login expulsaria do próprio login usuários
-  legados. Endurecer a entrada viraria um outage.
+- `RegisterIn.password` e `LoginIn.password` usam o tipo `Password`:
+  `min_length` vem do `Settings` (não de um literal), `max_length=72` e um
+  `AfterValidator` rejeita >72 **bytes UTF-8**. O teto em bytes é o que importa:
+  72 caracteres multibyte podem passar de 72 bytes e seriam truncados pelo
+  bcrypt.
+- Login usa a mesma regra do registro. Não há caminho legado de senha >72
+  bytes: o bcrypt 5.x também as rejeita, então aceitá-las no schema só
+  transferiria o erro para o hash.
 - `TwoFactorVerifyIn.code` aceita 6..64 chars (TOTP de 6 dígitos **ou** recovery
   code de 10 chars) e **não** recebe pattern de 6 dígitos. O pattern `^\d{6}$`
   fica só em `TotpConfirmIn.code`, que é a confirmação de setup do TOTP.
@@ -617,8 +619,8 @@ passaria.
   apareceria como erro de schema na construção do modelo. O valor nunca é
   capado em silêncio: política impossível de cumprir é erro de config, e erro de
   config deve falhar alto.
-- O limite de 72 é contado em CARACTERES, enquanto o truncamento do bcrypt é em
-  BYTES: senhas multibyte ainda podem truncar (comportamento pré-existente).
+- O limite é validado em **bytes UTF-8**, não em caracteres: uma senha de 72
+  chars multibyte é rejeitada na fronteira e nunca chega truncada ao bcrypt.
 
 ---
 

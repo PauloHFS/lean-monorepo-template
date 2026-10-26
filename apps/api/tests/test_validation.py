@@ -53,9 +53,15 @@ def test_login_rejects_short_password() -> None:
         LoginIn(email="a@b.com", password="x" * (settings.password_min_length - 1))
 
 
-def test_login_accepts_long_password_without_max_length() -> None:
-    # Sem max_length de propósito: senhas legadas >72 chars precisam logar.
-    assert LoginIn(email="a@b.com", password="x" * 100)
+def test_login_rejects_password_above_72_chars() -> None:
+    with pytest.raises(ValidationError):
+        LoginIn(email="a@b.com", password="x" * 100)
+
+
+def test_register_rejects_multibyte_password_above_72_bytes() -> None:
+    # 40 caracteres, mas 80 bytes em UTF-8: o limite é em bytes, não chars.
+    with pytest.raises(ValidationError):
+        RegisterIn(email="a@b.com", password="é" * 40)
 
 
 # --- 2FA ----------------------------------------------------------------------

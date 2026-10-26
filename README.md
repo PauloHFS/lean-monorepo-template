@@ -183,7 +183,7 @@ Recovery codes são aceitos no lugar do TOTP (caso o usuário perca o app).
 
 ## Auth
 
-- Senha: **bcrypt** (custo 12, via lib `bcrypt` direto). O repo trunca a senha em 72 **bytes** antes de chamar a lib — o bcrypt 5.x **rejeita** acima de 72 bytes em vez de truncar.
+- Senha: **bcrypt** (custo 12, via lib `bcrypt` direto). Register e login rejeitam senhas acima de 72 **bytes UTF-8** na fronteira (Pydantic) e no hash — nada é truncado em silêncio.
 - Sessão: **token opaco** em cookie `HttpOnly`, `SameSite=Lax`, `Secure` em prod.
 - O cookie armazena o token cru; o banco guarda `sha256(token)` em `sessions.token_hash` (índice unique).
 - Logout = `DELETE FROM sessions WHERE token_hash = …` → revogação instantânea.
