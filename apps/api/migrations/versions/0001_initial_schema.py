@@ -1,19 +1,13 @@
-"""initial schema: tudo num único arquivo.
+"""Baseline schema: todas as tabelas num único arquivo.
 
 Revision ID: 0001_initial_schema
 Revises:
 Create Date: 2026-10-04 00:00:00
 
-Este é um *template*, não um app em produção: não há razão para manter
-o histórico incremental de migrations. Se você for usar este template em
-um prod, faça a partitura a partir deste commit:
-
-    for rev in 0001_initial_schema 0002_rate_limits 0003_kv_cache 0004_2fa \\
-               0005_pg_cron_cleanup 0006_procrastinate_jobs; do
-        git show $rev:migrations/versions/$rev.py > old_migrations/$rev.py
-    done
-
-Depois crie novas migrations com `alembic revision --autogenerate -m "..."`.
+Este é o **baseline** do template: um único arquivo, sem histórico
+incremental. Não existem migrations 0002+ neste repositório. Para evoluir o
+schema, crie uma nova revision a partir daqui com
+`alembic revision --autogenerate -m "..."`.
 
 Conteúdo (ordem de criação):
 
@@ -157,7 +151,7 @@ def upgrade() -> None:
     op.create_index("ix_sessions_user_id", "sessions", ["user_id"], if_not_exists=True)
     op.create_index("ix_sessions_expires_at", "sessions", ["expires_at"], if_not_exists=True)
 
-    # ---------- 5. kv_cache (UNLOGGED) ---------------------------------------
+    # ---------- 4. kv_cache (UNLOGGED) ---------------------------------------
     # UNLOGGED: super rápido, mas não replicado/recuperável — exatamente o que
     # queremos para cache volátil. Se precisar persistir, mude para LOGGED.
     op.execute("""
@@ -170,7 +164,7 @@ def upgrade() -> None:
     """)
     op.create_index("ix_kv_cache_expires_at", "kv_cache", ["expires_at"], if_not_exists=True)
 
-    # ---------- 6. rate_limits -----------------------------------------------
+    # ---------- 5. rate_limits -----------------------------------------------
     # chave opaca (recomendação: "ip:endpoint" ou "user:endpoint"), janela fixa.
     op.execute("""
         CREATE TABLE IF NOT EXISTS rate_limits (
@@ -181,7 +175,7 @@ def upgrade() -> None:
     """)
     op.execute("CREATE INDEX IF NOT EXISTS ix_rate_limits_window_start ON rate_limits (window_start);")
 
-    # ---------- 7. 2FA: TOTP + recovery codes + WebAuthn passkeys ------------
+    # ---------- 6. 2FA: TOTP + recovery codes + WebAuthn passkeys ------------
     op.execute("""
         ALTER TABLE users
           ADD COLUMN IF NOT EXISTS totp_enabled     BOOLEAN NOT NULL DEFAULT FALSE,
@@ -215,7 +209,7 @@ def upgrade() -> None:
     op.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_passkeys_credential_id ON user_passkeys (credential_id);")
     op.execute("CREATE INDEX IF NOT EXISTS ix_passkeys_user ON user_passkeys (user_id);")
 
-    # ---------- 8. pg_cron jobs ---------------------------------------------
+    # ---------- 7. pg_cron jobs ---------------------------------------------
     bind = op.get_bind()
     for job in _CRON_JOBS:
         bind.execute(
@@ -227,7 +221,7 @@ def upgrade() -> None:
             },
         )
 
-    # ---------- 9. Procrastinate schema -------------------------------------
+    # ---------- 8. Procrastinate schema -------------------------------------
     # Schema oficial vem direto da lib (nunca duplicar ~600 linhas de SQL).
     _apply_procrastinate_schema()
 

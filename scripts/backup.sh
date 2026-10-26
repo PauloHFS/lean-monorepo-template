@@ -73,8 +73,7 @@ fi
 : "${RCLONE_REMOTE_NAME:=r2}"
 RCLONE_BUCKET="${RCLONE_BUCKET:-}"
 : "${BACKUP_KEEP_DAYS:=14}"
-# BACKUP_DIR é o nome novo; OUT_DIR fica como alias para não quebrar chamadas antigas.
-BACKUP_DIR="${BACKUP_DIR:-${OUT_DIR:-/tmp/lean-monorepo-backups}}"
+BACKUP_DIR="${BACKUP_DIR:-/tmp/lean-monorepo-backups}"
 
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 OUT_FILE="${BACKUP_DIR}/${POSTGRES_DB}_${TS}.dump"

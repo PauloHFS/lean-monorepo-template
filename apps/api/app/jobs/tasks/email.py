@@ -35,7 +35,8 @@ async def send_email(
 
     `ctx` fica disponível para middlewares/logs futuros; o corpo não o usa ainda.
     Quando o payload traz `trace_context`, o span `email.send` é filho do span
-    que enfileirou o job; jobs antigos (sem contexto) rodam como span raiz.
+    que enfileirou o job; enfileiramentos manuais/CLI sem contexto rodam como
+    span raiz.
     """
     parent: Context = (
         extract_trace_context({"trace_context": trace_context}) if trace_context else Context()

@@ -71,7 +71,6 @@ multibyte password can never be silently truncated into a different secret.
 **Consequences**:
 - One library instead of two.
 - Tests caught the passlib issue at template time; users don't rediscover it.
-- Hash format: `$2b$…` (matches what `passlib` produced for existing hashes — backwards-compatible).
 
 ---
 

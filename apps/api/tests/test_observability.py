@@ -104,7 +104,7 @@ def test_inject_trace_context_without_existing_key() -> None:
     assert inject_trace_context({"to": "a@b.com"})["to"] == "a@b.com"
 
 
-def test_extract_trace_context_from_old_payload() -> None:
+def test_extract_trace_context_missing_returns_none() -> None:
     context = extract_trace_context({"to": "a@b.com"})
 
     assert not trace.get_current_span(context).get_span_context().is_valid
