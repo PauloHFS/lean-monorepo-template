@@ -11,15 +11,20 @@ schema, crie uma nova revision a partir daqui com
 
 Conteúdo (ordem de criação):
 
-  1. Extensões            (citext)
+  1. Extensões            (citext obrigatória; pg_cron opcional)
   2. users                (com trigger updated_at)
   3. sessions             (FK -> users)
   4. kv_cache             (UNLOGGED)
   5. rate_limits          (rate-limit por chave)
   6. jobs                 (job_rate_limits + dead_letters)
   7. 2FA em users         (TOTP cols + recovery_codes + passkeys)
-  8. pg_cron jobs         (limpezas agendadas)
+  8. pg_cron jobs         (limpezas agendadas, só se pg_cron existir)
   9. Procrastinate schema
+
+Portabilidade: UUIDs usam `gen_random_uuid()` (built-in desde o PG13), então
+uuid-ossp não é necessária. `pg_cron` é opcional — em bancos gerenciados
+(RDS/Aurora/Cloud SQL) sem a extensão o schema sobe e os jobs de limpeza são
+omitidos com aviso, em vez de o `alembic upgrade head` falhar.
 
 Idempotente: usa IF NOT EXISTS nos CREATE TABLE principais.
 """
@@ -95,6 +100,18 @@ _CRON_JOBS = [
 ]
 
 
+def _extension_installed(name: str) -> bool:
+    """True se a extensão já está instalada no banco alvo."""
+    return bool(
+        op.get_bind()
+        .execute(
+            text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = :name)"),
+            {"name": name},
+        )
+        .scalar()
+    )
+
+
 def _apply_procrastinate_schema() -> None:
     """Aplica procrastinate/sql/schema.sql via connector sync (psycopg3).
 
@@ -117,14 +134,32 @@ def _apply_procrastinate_schema() -> None:
 # =============================================================================
 def upgrade() -> None:
     # ---------- 1. Extensões -------------------------------------------------
+    # citext é usada pela coluna users.email: sem ela o schema é impossível,
+    # então a criação é obrigatória (não opcional).
     op.execute("CREATE EXTENSION IF NOT EXISTS citext;")
-    # uuid-ossp é criada em scripts/postgres-init; aqui só garantimos.
-    op.execute("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";")
+    # UUIDs usam gen_random_uuid() (built-in desde o PG13): uuid-ossp não entra.
+    # pg_cron é opcional e só é criada se o servidor a oferecer (RDS/Cloud SQL
+    # podem não a ter, ou tê-la sem shared_preload_libraries). A falha de
+    # criação é rebaixada a aviso; o scheduling abaixo já checa a instalação.
+    op.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM pg_available_extensions WHERE name = 'pg_cron'
+            ) THEN
+                BEGIN
+                    CREATE EXTENSION IF NOT EXISTS pg_cron;
+                EXCEPTION WHEN OTHERS THEN
+                    RAISE NOTICE 'pg_cron disponível mas não criada (%): jobs de limpeza omitidos', SQLERRM;
+                END;
+            END IF;
+        END $$;
+    """)
 
     # ---------- 2. users -----------------------------------------------------
     op.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             email         CITEXT NOT NULL UNIQUE,
             password_hash TEXT   NOT NULL,
             full_name     TEXT,
@@ -162,7 +197,7 @@ def upgrade() -> None:
     # Token opaco, armazenamos só o hash; cookie envia o token cru.
     op.execute("""
         CREATE TABLE IF NOT EXISTS sessions (
-            id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             token_hash  TEXT NOT NULL UNIQUE,
             user_agent  TEXT,
@@ -238,7 +273,7 @@ def upgrade() -> None:
 
     op.execute("""
         CREATE TABLE IF NOT EXISTS totp_recovery_codes (
-            id        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             code_hash TEXT NOT NULL,
             used_at   TIMESTAMPTZ
@@ -248,7 +283,7 @@ def upgrade() -> None:
 
     op.execute("""
         CREATE TABLE IF NOT EXISTS user_passkeys (
-            id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             credential_id BYTEA NOT NULL,
             public_key    BYTEA NOT NULL,
@@ -263,16 +298,21 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS ix_passkeys_user ON user_passkeys (user_id);")
 
     # ---------- 8. pg_cron jobs ---------------------------------------------
-    bind = op.get_bind()
-    for job in _CRON_JOBS:
-        bind.execute(
-            text("SELECT cron.schedule(:name, :schedule, :command)"),
-            {
-                "name": job["name"],
-                "schedule": job["schedule"],
-                "command": job["sql"].strip(),
-            },
-        )
+    # Só agenda se a extensão estiver realmente instalada. Sem pg_cron o
+    # schema continua válido; a limpeza periódica fica a cargo do operador.
+    if _extension_installed("pg_cron"):
+        bind = op.get_bind()
+        for job in _CRON_JOBS:
+            bind.execute(
+                text("SELECT cron.schedule(:name, :schedule, :command)"),
+                {
+                    "name": job["name"],
+                    "schedule": job["schedule"],
+                    "command": job["sql"].strip(),
+                },
+            )
+    else:
+        print("[migration] pg_cron ausente: jobs de limpeza não agendados")
 
     # ---------- 9. Procrastinate schema -------------------------------------
     # Schema oficial vem direto da lib (nunca duplicar ~600 linhas de SQL).
@@ -287,8 +327,9 @@ def downgrade() -> None:
     # Um downgrade que precise removê-las deve fazê-lo à parte.
 
     bind = op.get_bind()
-    for job in _CRON_JOBS:
-        bind.execute(text("SELECT cron.unschedule(:name)"), {"name": job["name"]})
+    if _extension_installed("pg_cron"):
+        for job in _CRON_JOBS:
+            bind.execute(text("SELECT cron.unschedule(:name)"), {"name": job["name"]})
 
     op.execute("DROP TABLE IF EXISTS user_passkeys;")
     op.execute("DROP TABLE IF EXISTS totp_recovery_codes;")

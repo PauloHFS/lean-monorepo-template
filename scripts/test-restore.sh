@@ -185,6 +185,9 @@ INSERT INTO restore_probe (payload, amount, created_at) VALUES
 "
 
 log "gerando backup local com scripts/backup.sh"
+# A prova usa dump em texto claro: restore.sh só lê formato custom puro (não
+# descriptografa). Zera a passphrase para não herdar BACKUP_ENCRYPT_PASSPHRASE
+# do ambiente e gerar um .dump.enc que o glob abaixo não encontraria.
 ENV_FILE=/dev/null \
   POSTGRES_HOST="$POSTGRES_HOST" \
   POSTGRES_PORT="$POSTGRES_PORT" \
@@ -192,6 +195,7 @@ ENV_FILE=/dev/null \
   POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
   POSTGRES_DB="$SRC_DB" \
   BACKUP_DIR="$BACKUP_DIR" \
+  BACKUP_ENCRYPT_PASSPHRASE="" \
   RCLONE_BUCKET="" \
   bash "$SCRIPT_DIR/backup.sh"
 

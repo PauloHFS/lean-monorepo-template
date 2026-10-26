@@ -3,6 +3,8 @@
 # Perfis:
 #   - default: sobe só Postgres (dev leve)
 #   - app:     Postgres + api + worker
+#   - dev:     mailpit (SMTP de captura + web UI), só quando pedido
+#   - observability: otel-collector + tempo + prometheus + grafana
 # =============================================================================
 name: lean-monorepo
 
@@ -30,9 +32,12 @@ services:
 
   # ---- Mailpit: SMTP server com web UI para dev/test ----------------------
   # Captura emails enviados pelo SmtpProvider. Ver em http://localhost:8025
+  # Perfil `dev`: sem ele, `--profile app` exporia um relay SMTP accept-any
+  # (1025) e a UI que lê os emails (8025) mesmo em stacks não-dev.
   mailpit:
     image: axllent/mailpit:v1.32.0
     container_name: lm_mailpit
+    profiles: ["dev"]
     restart: unless-stopped
     environment:
       MP4_SMTP_AUTH_ACCEPT_ANY: 1
@@ -163,8 +168,9 @@ services:
     profiles: ["observability"]
     restart: unless-stopped
     environment:
-      # Grafana 11.3.1 ignora env vazio e cai no default "admin" do defaults.ini: defina a senha no .env.
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      # Obrigatória: sem ela o Grafana 11.3.1 cai no default admin/admin.
+      # `:?` faz o compose recusar subir a stack sem credencial explícita.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?defina GRAFANA_ADMIN_PASSWORD no .env}
     ports:
       - "3000:3000"
     volumes:
