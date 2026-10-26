@@ -133,6 +133,12 @@ def upgrade() -> None:
         END;
         $$ LANGUAGE plpgsql;
     """)
+    op.execute("""
+        DROP TRIGGER IF EXISTS trg_users_updated_at ON users;
+        CREATE TRIGGER trg_users_updated_at
+        BEFORE UPDATE ON users
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+    """)
 
     # ---------- 3. sessions (server-side) ------------------------------------
     # Token opaco, armazenamos só o hash; cookie envia o token cru.
