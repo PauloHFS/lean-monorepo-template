@@ -19,6 +19,12 @@ from app.jobs.tasks.email import send_email
 router = APIRouter()
 
 
+def require_superuser(user: CurrentUser) -> None:
+    """Mesma regra do delete: listar todos os usuários / enviar e-mail é só admin."""
+    if not user.is_superuser:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+
 class EnqueueEmailIn(BaseModel):
     to: EmailStr
     subject: str = Field(max_length=200)
@@ -30,9 +36,8 @@ class EnqueueEmailOut(BaseModel):
     status: str
 
 
-@router.get("", response_model=list[UserOut])
+@router.get("", response_model=list[UserOut], dependencies=[Depends(require_superuser)])
 async def list_users(
-    _: CurrentUser,
     session: DB,
     # Teto de 100 evita varredura/payload descontrolado num endpoint autenticado.
     limit: int = Query(default=50, ge=1, le=100),
@@ -80,7 +85,10 @@ async def delete_user(user_id: str, user: CurrentUser, session: DB) -> None:
     "/enqueue-email",
     response_model=EnqueueEmailOut,
     status_code=202,
-    dependencies=[Depends(rate_limit("users.enqueue_email", limit=5, window_s=60))],
+    dependencies=[
+        Depends(require_superuser),
+        Depends(rate_limit("users.enqueue_email", limit=5, window_s=60)),
+    ],
 )
 async def enqueue_email(payload: EnqueueEmailIn, user: CurrentUser) -> EnqueueEmailOut:
     """Enfileira um `email.send` na fila do Procrastinate (mesma task do worker/CLI)."""

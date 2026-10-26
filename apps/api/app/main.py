@@ -64,9 +64,10 @@ app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     lifespan=lifespan,
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
+    # Em prod os docs/OpenAPI expõem o mapa de rotas a anônimos; desliga.
+    docs_url=None if settings.is_prod else "/api/docs",
+    redoc_url=None if settings.is_prod else "/api/redoc",
+    openapi_url=None if settings.is_prod else "/api/openapi.json",
 )
 
 # Observability — vendor-agnostic no app. Setar OTEL_EXPORTER_OTLP_ENDPOINT
@@ -96,10 +97,13 @@ app.include_router(api_router, prefix="/api/v1")
 
 
 @app.get("/favicon.ico", include_in_schema=False)
+@app.get("/favicon.svg", include_in_schema=False)
 async def favicon():
-    f = SPA_DIST / "favicon.ico"
-    if f.exists():
-        return FileResponse(f)
+    """Serve o favicon que existir no build (o Vite copia `public/` para `dist/`)."""
+    for name in ("favicon.svg", "favicon.ico"):
+        f = SPA_DIST / name
+        if f.exists():
+            return FileResponse(f)
     return JSONResponse(status_code=404, content={"detail": "not found"})
 
 
