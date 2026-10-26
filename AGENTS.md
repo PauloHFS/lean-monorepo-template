@@ -79,6 +79,7 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - Nunca concatene entrada do usuário em SQL. Isso evita SQL Injection mesmo nos pontos de acesso SQL explícito.
 - Modelos ORM (`Mapped[]`) servem ao schema e ao Alembic; queries de runtime servem ao Core.
 - Gere migrations com `just api-revision`, revise o resultado e não edite uma migration já aplicada.
+- A baseline **não exige `uuid-ossp`**: UUIDs usam `gen_random_uuid()` (built-in desde o PG13). `pg_cron` é **opcional**: só é criada se `pg_available_extensions` a oferecer e os jobs de cleanup só são agendados se ela estiver instalada — em RDS/Aurora/Cloud SQL sem pg_cron o schema sobe e a limpeza periódica fica com o operador. `citext` **continua obrigatória** (coluna `users.email`).
 
 ### Filas e jobs
 
@@ -86,10 +87,17 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - `register_task(queue, action, *, max_retries=3)`: `max_retries` é quantas vezes o Procrastinate tenta de novo (0 = uma execução só). Retry infinito não existe — sem teto, a falha nunca vira dead letter.
 - Enfileiramento passa por `defer_job(task, ...)`: quando `rate_limit_kind`/`rate_limit_limit` são passados, ele consulta `job_rate_limits` (janela fixa alinhada ao epoch) antes de `defer_async`.
 - `register_task` liga a DLQ: a falha só vira `dead_letters` (`kind`, `key`, `payload` com `kwargs`/`attempts`, `error`, `original_job_id` do `ctx`) na **última** tentativa — a mesma decisão de retry do Procrastinate —, então há uma linha por job que desistiu, não uma por tentativa. `JobAborted` não é falha e não entra na DLQ.
-- `job_rate_limits` e `dead_letters` são criadas na baseline; o cleanup roda via pg_cron (rate limits a cada 15min; dead letters não-pending com >90 dias diariamente).
+- `job_rate_limits` e `dead_letters` são criadas na baseline; o cleanup roda via pg_cron quando a extensão está disponível (rate limits a cada 15min; dead letters não-pending com >90 dias diariamente).
 - A DLQ é operável por CLI: `python -m app.cli list-dead-letters [limit]`, `retry-dead-letter <id>` e `discard-dead-letter <id>`.
 - `JobRateLimitExceeded` vira **429** (não 500) via handler em `app/main.py`.
 - `job_id` é o id do Procrastinate (inteiro), não um UUID.
+
+### Rate limiting e 2FA
+
+- O rate limit de auth é **duplo**: por IP+endpoint (`rate_limit(...)`, tabela `rate_limits`) e por conta (`enforce_account_limit(...)`, chave `acct:<scope>:<email_normalizado>`). Login: IP 5/60s + conta 10/300s; register: IP 10/60s + conta 3/h.
+- Os endpoints de 2FA têm limites próprios: `2fa.verify` 10/60s; `2fa.passkey.login.options` e `2fa.passkey.login.verify` 20/60s.
+- O `pending_token` do 2FA é **de uso único**: `store_pending` grava no cache com TTL de 300s e `consume_pending` apaga no primeiro uso. No login por passkey, um pending que já carrega `challenge` não pode gerar outro (senão quem tem a senha renova o pending indefinidamente).
+- Audit logging em auth: `auth.login`/`auth.register`/`auth.logout` registram outcome e um fingerprint sha256 truncado do e-mail (nunca o endereço cru). E-mail inexistente verifica contra `DUMMY_PASSWORD_HASH` para não vazar existência de conta pelo tempo de resposta.
 
 ### Testes
 
@@ -119,6 +127,14 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 - Valide entrada na fronteira, use bind parameters no SQL e preserve as proteções contra XSS existentes no React e na API.
 - Nunca versione `.env`, credenciais, tokens ou chaves. Use `.env.example` apenas para nomes de variáveis sem segredos.
 - Configuração impossível é erro de config, e erro de config falha **alto e no boot**: o `Settings` valida o que a aplicação não consegue cumprir (ex.: `password_min_length` tem que estar em 1..72, senão o schema de senha é impossível). Nunca capar o valor em silêncio.
+- **Fail-fast de produção**: `Settings._validate_prod` (`model_validator(mode="after")`) recusa o boot com `APP_ENV=prod` se `SECRET_KEY` for o default ou tiver <32 chars, se `COOKIE_SECURE=false` ou se `WEB_ORIGIN` não começar com `https://`. Não relaxe esse validador para "fazer subir".
+- **TLS é requisito de deployment**: o repo serve HTTP puro; produção exige um reverse proxy/LB terminando HTTPS na frente. Sem TLS o cookie `Secure` não volta ao navegador e HSTS não protege nada.
+- `FORWARDED_ALLOW_IPS` (consumido pelo `uvicorn --proxy-headers`) deve listar **só** os IPs/redes do proxy real (default `127.0.0.1`). Nunca `*`: qualquer cliente forjaria `X-Forwarded-For` e ganharia um bucket novo de rate limit (AD-032).
+- `DB_SSLMODE` é anexado/sobrescrito na DSN (`app/db/session.py::apply_sslmode`) para Postgres gerenciado (ex.: `require`); não hardcode SSL no código.
+- **Passkey é vinculada ao usuário do pending**: lookup e update usam `credential_id AND user_id` (`PASSKEY_LOOKUP_SQL`/`PASSKEY_UPDATE_SQL`). Sem o predicado de `user_id`, a passkey do atacante verifica contra o challenge da vítima e a sessão sai para a vítima — account takeover. Não simplifique para lookup só por `credential_id`.
+- `GET /users` e `POST /users/enqueue-email` são **superuser-only** (`Depends(require_superuser)` → 403). `DELETE /users/{id}` permite o próprio usuário ou superuser.
+- Em prod, `SecurityHeadersMiddleware` adiciona HSTS (`max-age=31536000; includeSubDomains`) e a CSP estática (`CSP_POLICY`); em local/dev não entram (quebrariam o HMR do Vite). `docs_url`/`redoc_url`/`openapi_url` são `None` em prod — `/api/docs`, `/api/redoc` e `/api/openapi.json` não existem.
+- `/favicon.ico` e `/favicon.svg` são servidos do `dist/` (`FileResponse`, com 404 se nenhum existir).
 
 ### Imagem, saúde e boot
 
@@ -132,8 +148,17 @@ Este arquivo se aplica à raiz do repositório e a todos os diretórios abaixo d
 ### Backup e restauração
 
 - `scripts/backup.sh` roda no **host** (exige `pg_dump`/`rclone` no PATH). Sem `RCLONE_BUCKET` ele roda em modo local e mantém o dump. A sanidade do dump é `pg_restore --list`, não o tamanho do arquivo.
+- O dump é criado com `umask 077`/`chmod 600` (contém hashes de senha, TOTP cifrado e PII). `BACKUP_ENCRYPT_PASSPHRASE` o cifra (`openssl enc -aes-256-cbc -pbkdf2`, extensão `.dump.enc`); sem ela o script avisa que o arquivo sai em claro. `BACKUP_KEEP_COUNT` (default 14) é a retenção local; `BACKUP_KEEP_DAYS` é a remota.
 - `scripts/restore.sh` exige alvo explícito (`--db`/`POSTGRES_RESTORE_DB`) e `--yes`: nunca adivinhe o banco de destino.
 - `scripts/test-restore.sh` é a prova: cria bancos `<db>_restore_test_src/dst`, faz backup→restore e confere count, `to_regclass`, md5 do conteúdo, índice, PK e sequência. Ele só opera em banco com `restore_test` no nome. `just test-restore` roda local (exige Postgres + client no PATH); o CI roda o mesmo script no job `restore-test`.
+
+### CI e supply chain
+
+- As actions do CI/deploy são pinadas por **commit SHA** (com a versão em comentário); não troque por tag flutuante.
+- Dependabot (`.github/dependabot.yml`) abre PRs semanais para `pip`, `npm`, `github-actions` e `docker`; as instrumentações OTel sobem agrupadas.
+- O gate de auditoria do front no CI é `npm audit --omit=dev --audit-level=moderate` (local: `just web-audit`, `--audit-level=high`).
+- `just ci` roda `just validate-compose`, que interpola `${GRAFANA_ADMIN_PASSWORD:?...}` e **falha sem ela**: rode `GRAFANA_ADMIN_PASSWORD=... just ci`.
+- O deploy (`.github/workflows/deploy.yml`) publica no GHCR em push na `main`/tag `v*`, gera SBOM SPDX com syft e assina imagem + SBOM com cosign keyless (OIDC), com permissões mínimas (`packages: write`, `id-token: write`).
 
 ### SAST automatizado (Semgrep)
 
@@ -175,7 +200,7 @@ Use a menor matriz que cubra a mudança e rode `just ci` antes de submeter alter
 | Dependências Python ou npm | `just api-audit` e `just web-audit` |
 | Versão do Node ou toolchain | `mise install` + `mise ls` (fonte única em `.node-version`) + `npm ci` limpo (o `overrides` do `@hookform/resolvers` só se prova com install do zero) |
 | Qualquer alteração de código coberta pelas regras do `semgrep.yml` | `just semgrep` |
-| Dockerfile, compose ou entrypoint | `just validate-compose` + `bash -n scripts/entrypoint.sh` (sem daemon: `docker compose config --quiet`; o build real e o teto de tamanho da imagem são do job `docker` do CI) |
+| Dockerfile, compose ou entrypoint | `GRAFANA_ADMIN_PASSWORD=... just validate-compose` + `bash -n scripts/entrypoint.sh` (sem daemon: `docker compose config --quiet`; o build real e o teto de tamanho da imagem são do job `docker` do CI) |
 | Backup ou restauração | `bash -n scripts/backup.sh scripts/restore.sh scripts/test-restore.sh` + `just test-restore` (exige Postgres + client no PATH) |
 
 `just ci` inclui `just semgrep` (SAST), as auditorias de dependências e `just e2e-mock`; não inclui build do frontend, E2E contra a stack real, build Docker, Trivy nem o teste de restauração; rode esses checks quando a mudança os alcançar. O pre-commit não substitui `just ci`.

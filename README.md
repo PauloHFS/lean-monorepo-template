@@ -7,15 +7,15 @@ Template enxuto de monoprojeto com:
 - **Frontend** React 19 + TypeScript + Vite 8 + Tailwind 4 + React Router 8
 - **Tipos ponta a ponta** via `openapi-typescript` (regenerados com `just web-types`)
 - **2FA** opcional: TOTP (Google Authenticator) + passkey (WebAuthn/Touch ID)
-- **Rate limit** em `/auth/login` e `/auth/register` (Postgres, sem Redis)
+- **Rate limit** por IP e por conta em `/auth/login` e `/auth/register`, com limites próprios nos endpoints de 2FA (Postgres, sem Redis)
 - **Cache, filas, sessões, rate limit** — tudo em Postgres (sem Redis)
-- **Limpeza automática** via `pg_cron` (kv_cache, rate_limits, sessions, recovery codes)
+- **Limpeza automática** via `pg_cron` opcional (kv_cache, rate_limits, job_rate_limits, dead_letters, recovery codes, sessions)
 - **Email transacional** SMTP (Mailpit em dev, Resend/SES/Postmark/Mailgun/Brevo em prod)
 - **Observability** vendor-agnostic via OTLP (Grafana stack self-hosted) + Sentry opcional
 - **E2E** com Playwright (smoke + jornada crítica)
-- **CI** (backend lint/type/test, frontend lint/type/build, compose validate)
-- **Banco único** Postgres (PostGIS, pgvector, ltree, pg_trgm, btree_gist, pgcrypto, uuid-ossp, citext)
-- **Backup** automatizado para Cloudflare R2 (via `rclone`)
+- **CI + entrega** (backend lint/type/test, frontend lint/type/build, SAST, auditorias, E2E mock, SBOM/assinatura no deploy)
+- **Banco único** Postgres (PostGIS, pgvector, ltree, pg_trgm, btree_gist, pgcrypto, citext; baseline sem `uuid-ossp`, `pg_cron` opcional)
+- **Backup** automatizado para Cloudflare R2 (via `rclone`), com dump `0600`, cifra opcional e retenção local
 
 > Filosofia: **Postgres-only**. Cache, filas, grafos, geo, vetores, sessões — tudo no mesmo banco. Menos infra, menos ops, transações ACID cobrindo o app inteiro.
 
@@ -37,7 +37,7 @@ Template enxuto de monoprojeto com:
 │   │   │   │                 dead-letters (list/retry/discard), db-status
 │   │   │   └── main.py       FastAPI app
 │   │   ├── migrations/       alembic (1 arquivo: 0001_initial_schema.py)
-│   │   └── tests/            pytest (134 testes)
+│   │   └── tests/            pytest (169 testes)
 │   └── web/                  React SPA (Vite)
 │       ├── e2e/              Playwright specs
 │       ├── src/
@@ -56,7 +56,7 @@ Template enxuto de monoprojeto com:
 │   └── prometheus.yml
 ├── docs/architecture.md      ADRs
 ├── Dockerfile                multi-stage (Node build + Python runtime)
-├── docker-compose.yml        postgres + mailpit (+ app profile: api+worker, + observability profile)
+├── docker-compose.yml        postgres (+ app: api+worker · dev: mailpit · observability)
 ├── justfile                  atalhos de DX
 ├── .env.example              template de variáveis
 └── .pre-commit-config.yaml   pre-commit-hooks + schema-sync
@@ -78,12 +78,12 @@ Endpoints:
 - API: <http://localhost:8000/api/v1>
 - Docs: <http://localhost:8000/api/docs>
 - Health: <http://localhost:8000/api/v1/healthz> (readiness) · <http://localhost:8000/api/v1/livez> (liveness)
-- Mailpit (dev): <http://localhost:8025>  (`just mail`)
+- Mailpit (profile `dev`): <http://localhost:8025>  (`docker compose --profile dev up -d mailpit` · `just mail`)
 
 Pra criar um admin e logar:
 
 ```bash
-just cli seed      # imprime email + senha aleatória
+docker compose --profile app exec api python -m app.cli seed   # imprime email + senha aleatória
 ```
 
 ## Dev local (Postgres em Docker, app no host)
@@ -92,7 +92,7 @@ just cli seed      # imprime email + senha aleatória
 
 ```bash
 # 1) Postgres + Mailpit em Docker (app e worker ficam fora)
-docker compose up -d postgres mailpit
+docker compose --profile dev up -d postgres mailpit
 
 # 2) API (terminal 1)
 just api-install
@@ -122,10 +122,10 @@ Pra rodar api+worker+web paralelos num comando só: `just dev`.
 | Necessidade                | Solução                                                                                          |
 | -------------------------- | ------------------------------------------------------------------------------------------------ |
 | **Cache**                  | Tabela `kv_cache` (UNLOGGED + `expires_at`) — mais rápido que Redis, sem infra extra             |
-| **Filas / jobs**            | Procrastinate 3.10.0 (Postgres-only, heartbeat/stall built-in, DLQ opcional) — escala, ACID      |
+| **Filas / jobs**            | Procrastinate 3.10.0 (Postgres-only, heartbeat/stall built-in, DLQ em `dead_letters`) — escala, ACID |
 | **Sessões de auth**        | Tabela `sessions` com token opaco + hash — revogação instantânea, sem Redis                      |
 | **Rate limiting**          | Tabela `rate_limits` + janela fixa via `INSERT … ON CONFLICT DO UPDATE`                           |
-| **Limpeza automática**     | Extensão `pg_cron` — 4 jobs rodando sozinhos (kv_cache, rate_limits, sessions, recovery codes)    |
+| **Limpeza automática**     | `pg_cron` quando disponível — 6 jobs (kv_cache, rate_limits, job_rate_limits, dead_letters, recovery codes, sessions); opcional em RDS/Aurora/Cloud SQL |
 | **Grafos / hierarquia**    | Extensão `ltree` + CTEs recursivas — paths, subárvores, ancestry                                 |
 | **Geolocalização**         | Extensão `postgis` — pontos, polígonos, distâncias, índice GiST                                  |
 | **Full-text / fuzzy**      | Extensões `pg_trgm` + `unaccent` — busca tolerante a typo e acentos                              |
@@ -184,7 +184,7 @@ await defer_job(
 )
 ```
 
-As tabelas e o cleanup (pg_cron) vivem na baseline: `job_rate_limits` expira em
+As tabelas e o cleanup (`pg_cron`, quando disponível) vivem na baseline: `job_rate_limits` expira em
 1 dia; `dead_letters` resolvidas/descartadas expiram em 90 dias. Opere a DLQ por
 CLI: `python -m app.cli list-dead-letters`, `retry-dead-letter <id>` e
 `discard-dead-letter <id>`.
@@ -219,6 +219,8 @@ Recovery codes são aceitos no lugar do TOTP (caso o usuário perca o app).
 - O cookie armazena o token cru; o banco guarda `sha256(token)` em `sessions.token_hash` (índice unique).
 - Logout = `DELETE FROM sessions WHERE token_hash = …` → revogação instantânea.
 - Endpoints em `/api/v1/auth/{register,login,logout,me}`.
+- `/auth/login` responde no mesmo tempo para e-mail inexistente e senha errada (verificação contra um hash dummy de custo equivalente) e emite log de auditoria com um fingerprint do e-mail — nunca o endereço cru.
+- `GET /users` e `POST /users/enqueue-email` são **superuser-only** (403 para os demais). `DELETE /users/{id}` permite o próprio usuário ou um superuser.
 
 ---
 
@@ -252,10 +254,25 @@ URLs:
 - Tempo API: <http://localhost:3200>
 - Prometheus: <http://localhost:9090>
 
-Credenciais default do compose (Postgres `app`/`app`, Grafana `admin`/`admin`) são só para dev local.
-Defina `GRAFANA_ADMIN_PASSWORD` no `.env`: o Grafana 11.3.1 ignora a variável vazia e volta ao `admin`/`admin`.
+Credenciais default do compose (Postgres `app`/`app`) são só para dev local.
+`GRAFANA_ADMIN_PASSWORD` é **obrigatória** no profile `observability`: o compose usa `${GRAFANA_ADMIN_PASSWORD:?...}` e recusa subir sem ela (o Grafana 11.3.1 cairia em `admin`/`admin`).
 
 Sem Sentry self-hosted (pesado demais). Se precisar de error tracking, use Sentry SaaS via `SENTRY_DSN`.
+
+---
+
+## Produção
+
+O repositório serve **HTTP puro**. **TLS é requisito de deployment**: coloque um reverse proxy/balanceador terminando HTTPS na frente da API. Sem TLS o cookie `Secure` não volta ao navegador e o HSTS não protege nada — o app não embute TLS.
+
+- **Fail-fast de configuração**: com `APP_ENV=prod` o boot aborta se `SECRET_KEY` ainda for o default (ou tiver <32 chars), se `COOKIE_SECURE=false` ou se `WEB_ORIGIN` não começar com `https://`. Config impossível não sobe.
+- **Proxy confiável**: `FORWARDED_ALLOW_IPS` deve listar **só** os IPs/redes do seu proxy (default `127.0.0.1`). **Nunca use `*`**: qualquer cliente forjaria `X-Forwarded-For` e ganharia um bucket novo de rate limit.
+- **Postgres gerenciado**: defina `DB_SSLMODE` (ex.: `require`) — ele é anexado/sobrescrito na DSN. A baseline não exige `uuid-ossp` (usa `gen_random_uuid()`) e trata `pg_cron` como opcional (RDS/Aurora/Cloud SQL sobem sem ela; a limpeza periódica fica com o operador). `citext` continua obrigatória.
+- **Grafana**: `GRAFANA_ADMIN_PASSWORD` é obrigatória no profile `observability`; sem ela o Compose recusa subir.
+- **Mailpit**: fica atrás do profile `dev` e não sobe com `--profile app`. Use `docker compose --profile dev up -d mailpit` quando precisar capturar e-mail local.
+- **Docs desligados**: em prod `/api/docs`, `/api/redoc` e `/api/openapi.json` não existem. HSTS e CSP só são aplicados em prod.
+- **Backup**: `BACKUP_ENCRYPT_PASSPHRASE` cifra o dump (AES-256-CBC/PBKDF2) antes de manter/enviar; sem ela o dump sai em claro e o script avisa. Os dumps são `0600`; `BACKUP_KEEP_COUNT` controla a retenção local (default 14).
+- **Entrega**: `.github/workflows/deploy.yml` publica no GHCR a cada push na `main`/tag `v*` e anexa SBOM SPDX (syft) + assinatura keyless (cosign/OIDC). As actions são pinadas por commit SHA; o Dependabot abre PRs semanais para pip, npm, GitHub Actions e Docker.
 
 ---
 
@@ -266,8 +283,8 @@ Sem Sentry self-hosted (pesado demais). Se precisar de error tracking, use Sentr
 ### Dev local (Mailpit)
 
 ```bash
-just up                       # sobe Postgres + api + worker + mailpit
-just mail                     # abre http://localhost:8025
+docker compose --profile app --profile dev up -d   # Postgres + api + worker + mailpit
+just mail                                          # abre http://localhost:8025
 ```
 
 Quando o worker processar `email.send`, o email aparece na UI do Mailpit. Zero credenciais, zero custo.
@@ -318,10 +335,11 @@ just backup-now
 ```
 
 `backup.sh`:
-1. `pg_dump -Fc -Z 9` → arquivo local + sidecar `.sha256`.
+1. `pg_dump -Fc -Z 9` → arquivo local `0600` + sidecar `.sha256`.
 2. Sanidade real: `pg_restore --list` (um dump truncado **não** passa só por ter tamanho).
-3. `rclone copyto` → `r2:<bucket>/db/<db>_<ts>.dump` (sem `RCLONE_BUCKET` roda em modo local e **mantém** o dump).
-4. `rclone delete --min-age 14d` → retenção.
+3. Cifra opcional: com `BACKUP_ENCRYPT_PASSPHRASE` o dump vira `<db>_<ts>.dump.enc` (`openssl enc -aes-256-cbc -pbkdf2`); sem ela o script avisa que o dump (hashes de senha, TOTP e PII) sai em claro.
+4. `rclone copyto` → `r2:<bucket>/db/<arquivo>` (sem `RCLONE_BUCKET` roda em modo local e **mantém** o dump).
+5. `rclone delete --min-age 14d` → retenção remota; no modo local, `BACKUP_KEEP_COUNT` (default 14) mantém os últimos dumps.
 
 Os scripts rodam no **host** (precisam de `pg_dump`/`pg_restore`/`psql` no PATH) e usam `flock` para não se sobrepor.
 
@@ -367,20 +385,23 @@ No front, os tipos vêm de `components["schemas"][...]` (reexportados em `src/ap
 
 ---
 
-## CI
+## CI e entrega
 
 `.github/workflows/ci.yml`:
-- **backend**: ruff + pyright + pytest
-- **frontend**: tsc + lint (Biome) + build
+- **backend**: ruff + pyright + bandit + pytest
+- **frontend**: tsc + lint (Biome) + build + `npm audit --omit=dev --audit-level=moderate`
 - **sast**: semgrep com as regras locais de `semgrep.yml`
 - **dependency-audit**: pip-audit (via `uvx`) nas deps de produção do backend
 - **e2e**: Playwright nos cenários mockados (`page.route`), sem API/DB
 - **schema-sync**: regenera `schema.d.ts` e falha se estiver desatualizado
 - **compose**: valida que `docker-compose.yml` continua válido
 - **docker**: build da imagem + medição do tamanho real (teto de 700 MB) + Trivy (CRITICAL/HIGH bloqueia)
-- **restore-test**: backup → restore → verificação num Postgres efêmero
 
-Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, E2E mock, schema e compose). O build da imagem, a medição do tamanho, o Trivy e a prova de restauração só rodam no CI (exigem daemon).
+`.github/workflows/restore-test.yml` roda backup → restore → verificação num Postgres efêmero.
+
+`.github/workflows/deploy.yml` publica a imagem no GHCR em push na `main`/tag `v*`, gera SBOM SPDX com syft e assina imagem + SBOM com cosign keyless (OIDC). As actions do CI e do deploy são pinadas por **commit SHA**; o Dependabot abre PRs semanais para pip, npm, GitHub Actions e Docker.
+
+Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, E2E mock, schema e compose). O `validate-compose` interpola `GRAFANA_ADMIN_PASSWORD`, então rode `GRAFANA_ADMIN_PASSWORD=... just ci`. O build da imagem, a medição do tamanho, o Trivy e a prova de restauração só rodam no CI (exigem daemon).
 
 ---
 
@@ -400,14 +421,14 @@ Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, 
 - **Toolchain do front**: Node 24 com **fonte única** em `.node-version` (o mise, o Docker via build-arg e o CI via `node-version-file` leem dele; `engines` + `engine-strict` no `package.json` derrubam a install com Node antigo). Tailwind 4 é **CSS-first**: o tema vive em `@theme` no `src/index.css` e as classes do design system em `@utility` — não existe `tailwind.config.js` nem `postcss.config.js`.
 - **Segredos**: NUNCA comitar `.env`. Em prod, monte via secret manager do orquestrador.
 - **Logs**: `structlog` JSON em prod, console em dev (stderr pra não poluir stdout).
-- **Tests**: `just test` roda a suite de 134 testes. Tudo que não precisa de DB.
+- **Tests**: `just test` roda a suite de 169 testes. Tudo que não precisa de DB.
 - **E2E**: `just e2e-mock` roda só os cenários mockados (`page.route`, sem API/DB — é o que o CI roda); `just e2e` roda a suíte inteira pulando o que precisa de backend; `just e2e-full` sobe o stack e roda contra a SPA servida pela API em `:8000`.
 
 ---
 
 ## Decisões de arquitetura (ADRs)
 
-`docs/architecture.md` lista em detalhe cada decisão: Postgres-only, Procrastinate, bcrypt direto (não passlib), OpenAPI pipeline, SPA mesma origem, exception handler, CLI, tests, multi-region seams, observability vendor-agnostic, SQLAlchemy Core para queries (ORM só para schema), etc.
+`docs/architecture.md` lista em detalhe cada decisão: Postgres-only, Procrastinate, bcrypt direto (não passlib), OpenAPI pipeline, SPA mesma origem, exception handler, CLI, tests, multi-region seams, observability vendor-agnostic, SQLAlchemy Core para queries (ORM só para schema), hardening de produção/2FA, backup e supply chain, etc.
 
 ---
 

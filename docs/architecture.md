@@ -15,7 +15,8 @@ hierarchies. Each could be a separate service (Redis, Elasticsearch, Neo4j, Pine
 A monolith template shouldn't ship five different pieces of infra to be "complete".
 
 **Decision**: Use Postgres + extensions (PostGIS, pgvector, ltree, pg_trgm, btree_gist,
-pgcrypto, uuid-ossp, citext) as the single source of truth for everything except the front.
+pgcrypto, citext) as the single source of truth for everything except the front. UUIDs usam
+`gen_random_uuid()` (built-in desde o PG13), então `uuid-ossp` não entra na baseline (AD-033).
 
 **Consequences**:
 - One connection pool, one backup, one set of credentials.
@@ -93,6 +94,8 @@ OpenAPI, or use a runtime client like `openapi-fetch`.
 - Renaming a field on `UserOut` → typecheck fails on the front → fix or accept.
 - Adding a path? TS picks up via `paths["/api/v1/…"]` in the generated schema.
 - No runtime cost (types-only).
+- Em prod os docs/OpenAPI são desligados (AD-029): a geração de tipos usa o schema do
+  ambiente de dev/CI, não o de produção.
 
 ---
 
@@ -180,13 +183,16 @@ de infra) ou tabela `rate_limits` em Postgres.
 **Decision**: Tabela `rate_limits (key, count, window_start)` + `INSERT … ON CONFLICT
 DO UPDATE` que reseta a janela se expirada, incrementa caso contrário. Chave =
 `ip:endpoint`. Algoritmo de janela fixa (não sliding). Limites atuais: login 5/min,
-register 10/min.
+register 10/min. Além do limite por IP, login e register têm limite **por conta**
+(`enforce_account_limit`, chave `acct:<scope>:<email>`), porque um IP pode ser compartilhado
+(NAT) e a conta continua sendo o alvo do brute force (AD-031).
 
 **Consequences**:
-- 1 round-trip por request (`hit()`); aceitable para auth.
+- 1 round-trip por request (`hit()`); aceitável para auth.
 - Janela fixa tem o problema clássico de bursts no boundary (5 em :59 + 5 em :00),
   mas é o trade-off certo pra proteger contra força bruta.
-- Limpeza de linhas expiradas precisa de job (futuro: `pg_cron`).
+- A limpeza de linhas expiradas roda nos jobs de `pg_cron` da baseline quando a
+  extensão está instalada (AD-027/AD-033); sem ela, fica com o operador.
 - Se virar problema de latência sob carga, migrar para `pg_try_advisory_lock` mantém
   Postgres-only sem mudar a interface.
 
@@ -987,10 +993,275 @@ sem Redis/Celery.
 - Falhas ficam auditáveis e reexecutáveis pela CLI; a DLQ não substitui o retry
   do Procrastinate.
 - pg_cron limpa `job_rate_limits` com mais de 1 dia a cada 15min e
-  `dead_letters` não-`pending` com mais de 90 dias diariamente.
+  `dead_letters` não-`pending` com mais de 90 dias diariamente (quando a extensão
+  está instalada; AD-033).
 - Testes (`apps/api/tests/test_jobs.py`) cobrem nomes, SQL da janela, contagem
   do rate limit e o wrapper de DLQ (grava só na última tentativa, ignora
   `JobAborted`) sem tocar Postgres (AD-008).
+
+---
+
+## AD-028 · Configuração de produção fail-fast (SECRET_KEY, COOKIE_SECURE, WEB_ORIGIN, DB_SSLMODE)
+
+**Status**: current.
+
+**Context**: o `APP_ENV=prod` sozinho não garantia nada: o app subia com o `SECRET_KEY`
+default (ou curto), com `COOKIE_SECURE=false` e com `WEB_ORIGIN` http. O primeiro caso
+compromete a chave da qual o app deriva a cifra do segredo TOTP; o segundo faz o
+cookie `Secure` não voltar no HTTPS; o terceiro quebra a validação de origem do WebAuthn.
+Todas essas falhas apareceriam em runtime, no pior momento possível. Em paralelo, Postgres
+gerenciado exige `sslmode` na DSN, e deixar isso para o operador editar a URL à mão é
+pedir para esquecer.
+
+**Decision**:
+- `Settings._validate_prod` (`model_validator(mode="after")`) só age quando
+  `app_env == "prod"` e acumula **todos** os problemas numa única `ValueError`:
+  `SECRET_KEY` igual ao default ou com <32 chars, `COOKIE_SECURE=false`,
+  `WEB_ORIGIN` que não começa com `https://`.
+- `password_min_length` continua com o `field_validator` próprio (1..72): a política de
+  senha também é validada no boot, com mensagem acionável.
+- `db_sslmode` entra em `Settings`; `app/db/session.py::apply_sslmode` anexa ou
+  sobrescreve `sslmode` na query string da DSN, preservando os outros parâmetros.
+- `.env.example` documenta o contrato de prod e o `DB_SSLMODE`.
+
+**Consequences**:
+- Config impossível falha **alto e no boot**, com a lista completa de problemas — não é
+  preciso descobrir um por vez reiniciando o container.
+- `apps/api/tests/test_prod_config.py` fixa o fail-fast e o append/override do sslmode
+  sem tocar Postgres (AD-008).
+- O validador não substitui TLS: ele só recusa a config insegura. O HTTPS continua sendo
+  responsabilidade do proxy/LB (AD-029/AD-032).
+- `DB_SSLMODE` fica no código como configuração, não hardcoded — o mesmo artefato serve
+  dev, staging e bancos gerenciados.
+
+---
+
+## AD-029 · Edge hardening: HSTS/CSP só em prod, docs desligados e favicon
+
+**Status**: current.
+
+**Context**: os cabeçalhos de segurança eram globais. Em dev isso é ativamente ruim: a CSP
+bloqueia o inline/eval e o WebSocket do HMR do Vite, e HSTS em `http://localhost` é inútil
+(ou pior, gruda o browser em https para o dev). Ao mesmo tempo, produção expunha `/api/docs`,
+`/api/redoc` e `/api/openapi.json`, que entregam o mapa completo de rotas a qualquer anônimo.
+O favicon era só `.ico`, mas o build do Vite copia `public/favicon.svg` para `dist/` e o
+navegador pedia `/favicon.svg`.
+
+**Decision**:
+- `SecurityHeadersMiddleware` aplica sempre `X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy` e `Permissions-Policy`. HSTS (`max-age=31536000; includeSubDomains`) e
+  `CSP_POLICY` (estática, sem nonce) entram **somente** quando `settings.is_prod`.
+- A CSP permite `style-src 'self' 'unsafe-inline'` e `connect-src 'self'`; é uma constante
+  única para o app sobrescrever sem mexer no middleware.
+- Em prod, `docs_url`, `redoc_url` e `openapi_url` são `None` — as três rotas não existem.
+- `/favicon.ico` e `/favicon.svg` servem o arquivo que existir em `dist/` (svg primeiro),
+  com `404` JSON se nenhum existir.
+
+**Consequences**:
+- Dev mantém HMR e o browser não fixa HSTS em localhost; prod ganha HSTS/CSP sem código
+  condicional espalhado.
+- A CSP é estática: quem precisar de nonce/hash de script troca `CSP_POLICY` e o middleware,
+  não adiciona exceção por rota.
+- Desligar o OpenAPI em prod não quebra o front: os tipos são gerados em dev/CI (AD-004/AD-018).
+- O favicon em SVG e ICO evita 404 no browser e não depende de rota de API.
+
+---
+
+## AD-030 · Autorização dos endpoints de usuário e e-mail (superuser-only)
+
+**Status**: current.
+
+**Context**: `GET /users` listava todos os usuários para qualquer sessão autenticada e
+`POST /users/enqueue-email` permitia que qualquer conta usasse o relay SMTP para mandar
+e-mail arbitrário — enumeração de PII e abuso de envio. O `DELETE /users/{id}` já tinha a
+regra correta (o próprio usuário ou superuser), mas os outros dois não tinham nenhuma.
+
+**Decision**:
+- `require_superuser(user: CurrentUser)` levanta `403` quando `user.is_superuser` é falso.
+- `GET /users` e `POST /users/enqueue-email` declaram `Depends(require_superuser)`.
+- `DELETE /users/{id}` continua permitindo o próprio usuário ou superuser.
+- O enqueue mantém o rate limit por IP (`users.enqueue_email`, 5/60s) e o rate limit por
+  job (`email.send`, 20/60s por usuário).
+
+**Consequences**:
+- Listar usuários e disparar e-mail deixam de ser superfície para conta comum; o `403` é
+  o mesmo shape para os dois endpoints e não revela se a conta existe.
+- O admin é criado pelo CLI (`python -m app.cli seed` / `create-user`), não por uma rota pública.
+- A autorização é dependency declarada na rota, então o Semgrep/contrato continuam vendo
+  a rota normalmente.
+
+---
+
+## AD-031 · Hardening de 2FA e throttle de autenticação
+
+**Status**: current.
+
+**Context**: quatro furos independentes no fluxo de 2FA. (1) O login por passkey buscava a
+credencial só por `credential_id`: quem soubesse a senha da vítima podia responder o
+challenge com a **própria** passkey e a sessão era emitida para a vítima — account takeover.
+(2) `/2fa/verify` não tinha rate limit, e um espaço de 10^6 códigos TOTP com 3 válidos por
+janela torna brute force viável. (3) O `pending_token` podia ser reutilizado e, no fluxo de
+passkey, um pending já trocado por challenge podia gerar outro indefinidamente. (4) Login e
+register só tinham limite por IP; um atacante distribuído (ou NAT compartilhado) não era
+coberto por conta, e não havia trilha de auditoria nem proteção contra enumeração por tempo.
+
+**Decision**:
+- **Passkey vinculada ao usuário do pending**: lookup e update usam
+  `credential_id = :cid AND user_id = :uid` (`PASSKEY_LOOKUP_SQL`/`PASSKEY_UPDATE_SQL`).
+  As constantes são expostas para o teste verificar o binding sem banco.
+- **Limites próprios de 2FA**: `2fa.verify` 10/60s; `2fa.passkey.login.options` e
+  `2fa.passkey.login.verify` 20/60s (por IP+endpoint).
+- **Pending de uso único**: `store_pending` grava no cache com TTL de 300s e
+  `consume_pending` apaga no primeiro uso. O `passkey/login/options` recusa um pending que
+  já carrega `challenge` — não dá para renovar o pending sem uma nova senha.
+- **Throttle por conta** em auth: `enforce_account_limit` usa a chave
+  `acct:<scope>:<email_normalizado>` (lowercase). Login: IP 5/60s + conta 10/300s;
+  register: IP 10/60s + conta 3/h.
+- **Auditoria e timing**: `auth.login`/`auth.register`/`auth.logout` registram `outcome` e
+  um fingerprint sha256 truncado (12 hex) do e-mail normalizado, nunca o endereço cru.
+  E-mail inexistente verifica contra `DUMMY_PASSWORD_HASH` (mesmo custo do bcrypt) e devolve
+  o mesmo 401.
+- `clear_session_cookie` usa `_cookie_delete_attrs()` **sem** `max_age`: o
+  `Response.delete_cookie` do Starlette já manda `Max-Age=0` e passar `max_age` levanta
+  `TypeError` no logout.
+
+**Consequences**:
+- A passkey de um atacante não autentica contra o pending da vítima; o binding é o que
+  impede o ATO, e removê-lo é regressão de segurança, não simplificação.
+- Brute force de TOTP/recovery code fica limitado por IP, e o pending não sobrevive a uma
+  segunda tentativa nem ao reuso.
+- Logs de auth permitem investigar tentativas sem armazenar PII; o hash dummy fecha o
+  oráculo de tempo para e-mail inexistente.
+- O throttle por conta usa o e-mail normalizado — o mesmo e-mail com caixa diferente cai no
+  mesmo bucket.
+
+---
+
+## AD-032 · Proxy confiável (`FORWARDED_ALLOW_IPS`)
+
+**Status**: current.
+
+**Context**: o rate limit usa o IP do cliente (`request.client.host`) como parte da chave.
+Atrás de um proxy, esse IP é o do proxy; o uvicorn só troca pelo `X-Forwarded-For` quando
+`--proxy-headers` está ligado. Se ele confiar em qualquer origem, qualquer cliente forja o
+cabeçalho e ganha um bucket novo de rate limit (e polui os logs). O default do uvicorn é
+confiar só em loopback, mas isso não estava explícito no entrypoint.
+
+**Decision**:
+- O entrypoint exporta `FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-127.0.0.1}"` e sobe o
+  uvicorn com `--proxy-headers`.
+- O operador define os IPs/redes do proxy real (ex.: CIDR do ALB/ingress). Nunca `*`.
+- `.env.example` documenta a regra e o risco.
+
+**Consequences**:
+- Com o proxy correto, o rate limit e os logs enxergam o IP real do cliente.
+- Sem configurar, todas as requisições atrás do proxy parecem vir de `127.0.0.1` e
+  compartilham o mesmo bucket — comportamento seguro por padrão, mas exige ajuste no deploy.
+- `*` deixa de ser uma opção válida: seria um bypass de rate limit por header spoofing.
+
+---
+
+## AD-033 · Portabilidade do Postgres: pg_cron opcional, uuid-ossp removido, citext obrigatório
+
+**Status**: current.
+
+**Context**: a baseline criava `uuid-ossp` mesmo com o PG13+ oferecendo `gen_random_uuid()`
+built-in, e criava/agendava `pg_cron` incondicionalmente. Em bancos gerenciados
+(RDS/Aurora/Cloud SQL) a extensão pode não estar disponível ou não estar em
+`shared_preload_libraries`; o `alembic upgrade head` falhava e o schema não subia por causa
+de uma limpeza periódica opcional. `citext` é diferente: a coluna `users.email` depende dela,
+então o schema é impossível sem a extensão.
+
+**Decision**:
+- UUIDs usam `DEFAULT gen_random_uuid()`; `uuid-ossp` sai da baseline.
+- `pg_cron` é criada dentro de um bloco `DO` que só executa se `pg_available_extensions` a
+  oferecer; falha de `CREATE EXTENSION` vira `NOTICE`, não erro.
+- Os 6 jobs de limpeza (`kv_cache`, `rate_limits`, `job_rate_limits`, `dead_letters`,
+  recovery codes, sessions) só são agendados se `pg_extension` confirmar a instalação; sem
+  ela a migration imprime um aviso e segue.
+- `downgrade()` só faz `cron.unschedule` quando a extensão está instalada.
+- `citext` continua obrigatória (`CREATE EXTENSION IF NOT EXISTS citext` sem guarda).
+
+**Consequences**:
+- O schema sobe em RDS/Aurora/Cloud SQL sem pg_cron; a limpeza periódica passa a ser
+  responsabilidade do operador (job externo).
+- O baseline não falha mais por uma extensão opcional; o aviso no log deixa o trade-off
+  explícito.
+- `citext` permanece um requisito duro do schema, documentado no README/AGENTS.
+- Bancos existentes não precisam remover `uuid-ossp`; a mudança só vale para instalações novas.
+
+---
+
+## AD-034 · Confidencialidade e retenção de backups
+
+**Status**: current.
+
+**Context**: o dump contém hashes de senha, segredo TOTP cifrado e PII. O modo do arquivo
+dependia do umask do host, o dump era enviado ao R2 em claro e, no modo local (sem
+`RCLONE_BUCKET`), nada era podado — o diretório crescia para sempre. A retenção remota de
+14 dias existia, mas a local não.
+
+**Decision**:
+- `umask 077` no início e `chmod 600` no dump, no `.sha256` e no arquivo cifrado.
+- `BACKUP_ENCRYPT_PASSPHRASE` opcional cifra com
+  `openssl enc -aes-256-cbc -pbkdf2 -salt` (extensão `.dump.enc`); a passphrase vai por
+  **stdin** (`-pass stdin`), não em `argv` (visível no `ps`). Sem ela, o script imprime um
+  aviso explícito de que hashes/TOTP/PII saem em claro.
+- O `trap cleanup` remove o plaintext intermediário e os artefatos parciais em qualquer saída
+  que não seja sucesso.
+- A sanidade (`pg_restore --list`) roda **antes** da cifra/upload; um dump ilegível é
+  removido e nada é enviado.
+- `BACKUP_KEEP_COUNT` (default 14) poda os dumps locais; `BACKUP_KEEP_DAYS` (default 14)
+  continua sendo a retenção remota.
+- `restore.sh` exige alvo explícito e `--yes`; `test-restore.sh` prova o ciclo em bancos
+  descartáveis.
+
+**Consequences**:
+- A confidencialidade em repouso é uma escolha explícita do operador; sem passphrase o
+  arquivo é utilizável, mas inseguro, e o log deixa isso claro.
+- Perder a passphrase significa perder o backup — ela vai no secret manager, não no
+  repositório.
+- O `.sha256` é calculado sobre o arquivo final (cifrado, quando há cifra), então a
+  verificação cobre exatamente o que foi armazenado.
+- O modo local fica com disco limitado; o remoto continua com a janela de 14 dias.
+
+---
+
+## AD-035 · Supply chain e entrega (actions por SHA, Dependabot, GHCR + SBOM + cosign)
+
+**Status**: current.
+
+**Context**: as actions do CI/deploy eram referenciadas por tag flutuante (`@v4`), que pode
+ser removida e reapontada para outro commit; com pins exatos nas dependências, um CVE só
+aparecia na auditoria manual; e não havia artefato reproduzível, SBOM nem assinatura da
+imagem publicada. O deploy precisa construir com os mesmos build args que o CI valida e
+entregar uma imagem com trilha verificável.
+
+**Decision**:
+- Todas as actions do CI e do deploy são pinadas por **commit SHA**, com a versão em
+  comentário (`uses: owner/action@<sha> # vX.Y.Z`).
+- Dependabot (`.github/dependabot.yml`) abre PRs semanais para `pip` (`/apps/api`), `npm`
+  (`/apps/web`), `github-actions` e `docker`; as instrumentações OTel sobem num grupo só.
+- O gate de produção do front no CI é `npm audit --omit=dev --audit-level=moderate`; local,
+  `just web-audit` usa `--audit-level=high`.
+- `.github/workflows/deploy.yml` roda em push na `main` e em tags `v*`, publica no GHCR
+  (nome normalizado para minúsculo, tags `ref_name` + `sha`, labels OCI), gera SBOM SPDX
+  com `syft`, assina a imagem (`cosign sign`) e anexa o SBOM (`cosign attest --type
+  spdxjson`), com `persist-credentials: false` no checkout.
+- Permissões mínimas: `contents: read` no workflow e, no job de publicação,
+  `packages: write` + `id-token: write` (OIDC keyless). O SBOM também sobe como artifact.
+- `just ci` valida o compose, que interpola `${GRAFANA_ADMIN_PASSWORD:?...}`: a invocação
+  local é `GRAFANA_ADMIN_PASSWORD=... just ci`.
+
+**Consequences**:
+- Um tag retarget não muda silenciosamente o que roda no CI; atualizar action exige trocar
+  o SHA (e o Dependabot faz isso em PR revisável).
+- A imagem publicada é verificável: digest, SBOM SPDX e assinatura keyless, sem chave
+  estática no repositório.
+- O piso `moderate` no CI é mais estrito que o `high` local; a divergência é intencional
+  (CI é a barreira final).
+- O compose de observability é validado no `just ci` e falha sem a senha do Grafana — o
+  erro é de config, não de infraestrutura.
 
 ---
 
