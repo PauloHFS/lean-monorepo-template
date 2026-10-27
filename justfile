@@ -169,14 +169,25 @@ e2e:
 e2e-mock:
     cd apps/web && npm run e2e -- e2e/smoke.spec.ts e2e/auth-failure.spec.ts e2e/async-flow.spec.ts
 
+# E2E de passkey (cerimonia WebAuthn real com autenticador virtual do Chromium).
+# O backend valida expected_origin == WEB_ORIGIN (http://localhost:5173), entao a
+# cerimonia so roda no origin do Vite (:5173, que proxia /api -> :8000).
+# Exige a stack no ar; o spec pula se o stack nao responder ou se o WEB_ORIGIN
+# do .env local for outra origin.
+e2e-passkey:
+    {{compose_env}} docker compose up -d
+    @for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/api/v1/healthz >/dev/null 2>&1 && exit 0; sleep 2; done; echo "API nao respondeu /api/v1/healthz em 60s" >&2; exit 1
+    cd apps/web && GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-validation-only}" npm run e2e -- e2e/passkey.spec.ts; code=$?; {{compose_env}} docker compose down; exit $code
+
 # Sobe a stack e roda E2E contra a SPA servida pela API em :8000 (sobe e desce o compose)
 # Semeia um admin determinístico: POST /users/enqueue-email é superuser-only, e o
 # spec de job precisa de um superuser. E2E_ADMIN_EMAIL/E2E_ADMIN_PASSWORD
 # sobrescrevem os defaults (o seed e o spec usam os mesmos).
 e2e-full:
     {{compose_env}} docker compose up -d --build
+    @for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/api/v1/healthz >/dev/null 2>&1 && exit 0; sleep 2; done; echo "API nao respondeu /api/v1/healthz em 60s" >&2; exit 1
     {{compose_env}} docker compose exec -T api python -m app.cli create-user "${E2E_ADMIN_EMAIL:-e2e-admin@example.com}" "${E2E_ADMIN_PASSWORD:-e2e-admin-password-123}" "E2E Admin" --superuser
-    cd apps/web && E2E_BASE_URL=http://localhost:8000 E2E_ADMIN_EMAIL="${E2E_ADMIN_EMAIL:-e2e-admin@example.com}" E2E_ADMIN_PASSWORD="${E2E_ADMIN_PASSWORD:-e2e-admin-password-123}" npm run e2e; code=$?; {{compose_env}} docker compose down; exit $code
+    cd apps/web && GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-validation-only}" E2E_BASE_URL=http://localhost:8000 E2E_ADMIN_EMAIL="${E2E_ADMIN_EMAIL:-e2e-admin@example.com}" E2E_ADMIN_PASSWORD="${E2E_ADMIN_PASSWORD:-e2e-admin-password-123}" npm run e2e; code=$?; if [ $code -eq 0 ]; then just e2e-passkey; code=$?; fi; {{compose_env}} docker compose down; exit $code
 
 # Abre a web UI do Mailpit (precisa do compose up)
 mail:
