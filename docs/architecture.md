@@ -20,7 +20,7 @@ single source of truth for everything except the front. The schema requires only
 (created by the migration). The official image already ships the contrib extensions
 (`pg_trgm`, `unaccent`, `ltree`, `btree_gist`, `pgcrypto`), created by
 `scripts/postgres-init`; **PostGIS, pgvector and pg_cron do not come in it** and are opt-in per
-project (managed provider or a custom image — see README, "Extensões opt-in"). UUIDs usam
+project (managed provider or a custom image — see `docs/postgres.md`, "Extensões opt-in"). UUIDs usam
 `gen_random_uuid()` (built-in desde o PG13), então `uuid-ossp` não entra na baseline (AD-033).
 
 **Consequences**:
@@ -1204,7 +1204,7 @@ então o schema é impossível sem a extensão.
   responsabilidade do operador (job externo).
 - O baseline não falha mais por uma extensão opcional; o aviso no log deixa o trade-off
   explícito.
-- `citext` permanece um requisito duro do schema, documentado no README/AGENTS.
+- `citext` permanece um requisito duro do schema, documentado no `docs/postgres.md` e no AGENTS.md.
 - Bancos existentes não precisam remover `uuid-ossp`; a mudança só vale para instalações novas.
 - Volume de PG16/17 **não** é reutilizável no PG18 por causa do novo `PGDATA`: instalações
   existentes precisam de dump/restore (o caminho lógico do repo) e de um volume novo. O sintoma é
@@ -1308,11 +1308,13 @@ AD-032 (proxy confiável) continuam vigentes; esta ADR as conecta ao caminho de 
   embute Caddy nem `cloudflared` e **a app nunca termina TLS** — nem no uvicorn, nem por
   configuração condicional.
 - **O repo entrega o contrato, não o proxy**: compose com os serviços core sem profile,
-  portas publicadas só em loopback, `FORWARDED_ALLOW_IPS` explícito e a doc operacional no
-  `README.md` ("Implantar no Coolify"). A imagem buildada é a fonte da verdade: nada de
+  **nenhuma porta publicada no host** (o `docker-compose.yml` só tem `expose:`; as portas de
+  host vêm do `docker-compose.override.yml`, mesclado automaticamente pelo `docker compose`
+  sem `-f`), `FORWARDED_ALLOW_IPS` explícito e a doc operacional no
+  `docs/deploy.md` ("Implantar no Coolify"). A imagem buildada é a fonte da verdade: nada de
   bind-mount de `apps/api`/`scripts` mascarando o artefato.
 - O Coolify fala com o container pelo **IP na rede Docker**, não pela porta publicada no
-  host — é isso que permite publicar `127.0.0.1:${API_PORT}` sem quebrar o roteamento.
+  host — por isso o compose de deploy não precisa (e não deve) publicar `ports:`.
 
 **Contrato de cabeçalhos e confiança**:
 - O uvicorn (`--proxy-headers`) só olha `X-Forwarded-For`/`X-Forwarded-Proto` quando o peer
@@ -1349,11 +1351,14 @@ AD-032 (proxy confiável) continuam vigentes; esta ADR as conecta ao caminho de 
 **Consequences**:
 - `postgres`, `pgbouncer`, `migrate`, `api` e `worker` **sem `profiles:`**: o Coolify roda
   `docker compose up -d` sem `--profile` (bug #6395) e serviço com profile não sobe.
-- `api` e `postgres` publicam só em loopback (`127.0.0.1:${API_PORT:-8000}:8000`,
-  `127.0.0.1:${POSTGRES_PORT:-5432}:5432`); a internet fala com o proxy, não com o container.
+- `api` e `postgres` **não publicam porta no host**: o `docker-compose.yml` (artefato de deploy)
+  traz só `expose:`; as portas de host (`127.0.0.1:${API_PORT:-8000}:8000`,
+  `127.0.0.1:${POSTGRES_PORT:-5432}:5432`) vêm do `docker-compose.override.yml`, que o
+  `docker compose` auto-mescla **sem `-f`** — o Coolify e o CI passam `-f docker-compose.yml` e o
+  ignoram. A internet fala com o proxy, nunca com o container.
 - O compose não monta o código-fonte sobre a imagem: a imagem é o artefato que o CI mediu e
   assinou (AD-035), e bind-mount a mascararia.
-- Deploy e borda documentados no `README.md`, não espalhados em comentários de compose.
+- Deploy e borda documentados em `docs/deploy.md`, não espalhados em comentários de compose.
 
 **Limites conhecidos**:
 - Cloudflare corta corpo em **100 MB** (413) e leitura em **125 s** (524): upload grande vai
@@ -1377,7 +1382,9 @@ AD-032 (proxy confiável) continuam vigentes; esta ADR as conecta ao caminho de 
   (exige o mesmo major do Postgres e o banco parado), então o caminho de restore confiável é o
   dump **lógico** do repo (`scripts/backup.sh`, `just test-restore` e job `restore-test` do CI).
   Sem PITR em nenhum caminho: restaurar devolve a última cópia — PITR exige outro provider, que o
-  repo não oferece.
+  repo não oferece. Como o compose de deploy não publica a porta 5432, o dump lógico em prod roda
+  no **modo container** (`POSTGRES_CONTAINER=postgres`): `pg_dump`/`pg_restore` por
+  `docker compose exec -T`, com o dump (e a cifra/rclone) no host.
 - `FORWARDED_ALLOW_IPS` errado falha **em silêncio**: o rate limit passa a compartilhar um
   bucket (ou a aceitar IP forjado), sem erro no boot.
 
@@ -1517,7 +1524,7 @@ tabela de log opt-in, com o ator vindo do contexto do request.
   `JSONB`, e o ator via `set_config('app.actor_id', …, true)` na **mesma transação**
   do DML. A transação explícita é obrigatória porque o `SET LOCAL` morre no fim dela;
   com pgbouncer em `pool_mode=transaction` isso é seguro por construção (AD-037). A
-  receita completa (DDL, trigger, privilégios, LGPD/retenção) está no README,
+  receita completa (DDL, trigger, privilégios, LGPD/retenção) está em `docs/auth.md`,
   "Auditoria (receita opt-in)".
 - O ator vem da **sessão validada no servidor** (cookie opaco), nunca do body da
   request — aceitar `updated_by` do cliente é forjar a trilha.
