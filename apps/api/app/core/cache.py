@@ -27,7 +27,7 @@ GET_SQL = """
 
 UPSERT_SQL = """
     INSERT INTO kv_cache (key, value, expires_at)
-    VALUES (:key, :value::jsonb, :expires_at)
+    VALUES (:key, CAST(:value AS jsonb), :expires_at)
     ON CONFLICT (key) DO UPDATE
        SET value      = EXCLUDED.value,
            expires_at = EXCLUDED.expires_at

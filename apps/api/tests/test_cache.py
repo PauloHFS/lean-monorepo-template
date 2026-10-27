@@ -2,6 +2,8 @@
 
 import string
 
+from sqlalchemy import text
+
 from app.cli import gen_password
 from app.core.cache import DELETE_SQL, GET_SQL, UPSERT_SQL
 
@@ -15,9 +17,20 @@ def test_get_sql_filters_expired_rows():
 
 def test_upsert_sql_uses_jsonb_and_on_conflict():
     assert "INSERT INTO kv_cache" in UPSERT_SQL
-    assert "::jsonb" in UPSERT_SQL
+    assert "CAST(:value AS jsonb)" in UPSERT_SQL
     assert "ON CONFLICT (key) DO UPDATE" in UPSERT_SQL
     assert "EXCLUDED.value" in UPSERT_SQL
+
+
+def test_upsert_sql_binds_value_despite_jsonb_cast():
+    """`:value::jsonb` não é bind reconhecido: o `::` quebra o regex do SQLAlchemy.
+
+    O Postgres recebia o literal `:value::jsonb` e devolvia syntax error no
+    `cache.set` (todo login de usuário com 2FA ativo dava 500). Compilar a
+    query é o que prova o reconhecimento do bind sem tocar no banco (AD-008).
+    """
+    assert ":value::" not in UPSERT_SQL
+    assert "value" in text(UPSERT_SQL).compile().params
 
 
 def test_delete_sql_is_simple():
