@@ -134,10 +134,13 @@ web-lint-fix:
 # .env.example (nunca sobrescreve um .env existente) — `env_file: .env` é
 # obrigatório. GRAFANA_ADMIN_PASSWORD vira valor de validação se ausente/vazio,
 # porque a interpolação do Compose é global mesmo sem o profile observability.
+# Valida o compose de prod (`-f docker-compose.yml`, sem porta publicada no host)
+# e o config mesclado com o override local.
 validate-compose:
     @tmp=""; \
     if [ ! -f .env ]; then cp .env.example .env; tmp=1; fi; \
     trap '[ -n "$tmp" ] && rm -f .env' EXIT INT TERM; \
+    GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-validation-only}" docker compose -f docker-compose.yml config --quiet && \
     GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-validation-only}" docker compose config --quiet
 
 # Instala deps Node
@@ -174,12 +177,16 @@ e2e-mock:
 # cerimonia so roda no origin do Vite (:5173, que proxia /api -> :8000).
 # Exige a stack no ar; o spec pula se o stack nao responder ou se o WEB_ORIGIN
 # do .env local for outra origin.
+# A porta :8000 vem do docker-compose.override.yml local (o compose de prod
+# não publica porta no host). O CI roda `just e2e-mock`, sem stack.
 e2e-passkey:
     {{compose_env}} docker compose up -d
     @for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/api/v1/healthz >/dev/null 2>&1 && exit 0; sleep 2; done; echo "API nao respondeu /api/v1/healthz em 60s" >&2; exit 1
     cd apps/web && GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-validation-only}" npm run e2e -- e2e/passkey.spec.ts; code=$?; {{compose_env}} docker compose down; exit $code
 
 # Sobe a stack e roda E2E contra a SPA servida pela API em :8000 (sobe e desce o compose)
+# A porta :8000 vem do docker-compose.override.yml local (o compose de prod
+# não publica porta no host). O CI roda `just e2e-mock`, sem stack.
 # Semeia um admin determinístico: POST /users/enqueue-email é superuser-only, e o
 # spec de job precisa de um superuser. E2E_ADMIN_EMAIL/E2E_ADMIN_PASSWORD
 # sobrescrevem os defaults (o seed e o spec usam os mesmos).

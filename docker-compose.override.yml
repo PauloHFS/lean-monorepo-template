@@ -1,0 +1,21 @@
+# =============================================================================
+# Override de DESENVOLVIMENTO (só local).
+#
+# O `docker compose` mescla este arquivo automaticamente quando roda sem `-f`.
+# No Coolify NÃO: ele roda `docker compose -f docker-compose.yml --env-file .env
+# up -d`, então este override é ignorado e o deploy fica sem porta publicada no
+# host (o proxy fala com o container pelo IP da rede Docker). O CI também usa
+# `-f docker-compose.yml` explícito para testar o artefato de prod.
+#
+# Por que existe: no macOS o host só alcança containers por porta publicada.
+# O Vite (proxy /api -> :8000), o Playwright rodando no host, a stack do
+# `just up`/`just init` e os scripts de backup rodados no host precisam de
+# :8000 e :5432.
+# =============================================================================
+services:
+  api:
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+  postgres:
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"

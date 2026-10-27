@@ -89,6 +89,10 @@ COPY --from=build-web --chown=app:app /web/dist /app/apps/web/dist
 WORKDIR /app
 USER app
 
+# Porta interna do container (o Coolify usa o domínio com o sufixo :8000).
+# Não publica nada no host: a publicação é do Compose, não da imagem.
+EXPOSE 8000
+
 # Healthcheck sem curl (curl não está mais na imagem): urllib do venv.
 # urllib.urlopen levanta em non-200/sem conexão → exit != 0.
 #

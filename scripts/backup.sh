@@ -16,9 +16,16 @@
 # BACKUP_ENCRYPT_PASSPHRASE para gravá-lo/enviá-lo cifrado (AES-256-CBC +
 # PBKDF2). Sem a passphrase, o dump sai em texto claro e o script avisa.
 #
+# Modo container (POSTGRES_CONTAINER preenchido):
+#   No deploy do Coolify a porta do Postgres não é publicada no host, então o
+#   pg_dump roda dentro do container do Postgres (docker compose exec). No host
+#   continuam a cifragem (openssl), o envio (rclone), o checksum e a retenção.
+#
 # Variáveis:
-#   POSTGRES_HOST, POSTGRES_DB, POSTGRES_USER (obrigatórias)
-#   POSTGRES_PASSWORD, POSTGRES_PORT (5432)
+#   POSTGRES_DB, POSTGRES_USER (obrigatórias)
+#   POSTGRES_HOST (obrigatória só no modo host), POSTGRES_PASSWORD, POSTGRES_PORT (5432)
+#   POSTGRES_CONTAINER (vazio = modo host; com valor = modo container)
+#   BACKUP_COMPOSE_FILE (default: <repo>/docker-compose.yml; usado no modo container)
 #   RCLONE_BUCKET (vazio = modo local), RCLONE_REMOTE_NAME (r2)
 #   BACKUP_ENCRYPT_PASSPHRASE (vazio = sem cifra; use uma passphrase forte)
 #   BACKUP_KEEP_DAYS (14, retenção remota)
@@ -48,20 +55,31 @@ mantido/enviado. Sem ela, o dump é gravado em texto claro e um aviso é
 impresso.
 
 Variáveis:
-  POSTGRES_HOST, POSTGRES_DB, POSTGRES_USER   obrigatórias
-  POSTGRES_PASSWORD, POSTGRES_PORT            opcionais (5432)
-  RCLONE_BUCKET                               vazio = modo local
-  RCLONE_REMOTE_NAME                          default: r2
-  BACKUP_ENCRYPT_PASSPHRASE                   vazio = dump não cifrado
-  BACKUP_KEEP_DAYS                            default: 14 (retenção remota)
-  BACKUP_KEEP_COUNT                           default: 14 (retenção local)
-  BACKUP_DIR                                  default: /tmp/lean-monorepo-backups
-  ENV_FILE                                    default: .env
+  POSTGRES_DB, POSTGRES_USER                     obrigatórias
+  POSTGRES_HOST                                  obrigatória no modo host
+  POSTGRES_PASSWORD, POSTGRES_PORT               opcionais (5432)
+  POSTGRES_CONTAINER                             vazio = modo host (pg_dump local)
+  BACKUP_COMPOSE_FILE                                   default: <repo>/docker-compose.yml
+  RCLONE_BUCKET                                  vazio = modo local
+  RCLONE_REMOTE_NAME                             default: r2
+  BACKUP_ENCRYPT_PASSPHRASE                      vazio = dump não cifrado
+  BACKUP_KEEP_DAYS                               default: 14 (retenção remota)
+  BACKUP_KEEP_COUNT                              default: 14 (retenção local)
+  BACKUP_DIR                                     default: /tmp/lean-monorepo-backups
+  ENV_FILE                                       default: .env
+
+Modo container (POSTGRES_CONTAINER preenchido):
+  O dump é gerado dentro do container do Postgres via
+  `docker compose -f BACKUP_COMPOSE_FILE exec -T <serviço> pg_dump`, porque no deploy
+  do Coolify a porta do Postgres não é publicada no host. A sanidade do dump
+  também roda dentro do container (o host pode não ter pg_restore). Cifragem,
+  checksum, envio (rclone) e retenção continuam no host.
 
 Exemplos:
   ./scripts/backup.sh
   BACKUP_ENCRYPT_PASSPHRASE='...' ./scripts/backup.sh
   RCLONE_BUCKET= ./scripts/backup.sh
+  POSTGRES_CONTAINER=postgres ./scripts/backup.sh
   BACKUP_DIR=/var/backups/lean ./scripts/backup.sh --help
 EOF
 }
@@ -81,14 +99,40 @@ esac
 
 # Carrega .env se existir
 ENV_FILE="${ENV_FILE:-.env}"
+# O .env tem precedência (semântica já existente no script), mas um valor VAZIO
+# no .env não pode apagar o que veio do shell (POSTGRES_CONTAINER=postgres
+# ./scripts/backup.sh precisa vencer o `POSTGRES_CONTAINER=` do .env).
+_shell_container="${POSTGRES_CONTAINER:-}"
+_shell_compose_file="${BACKUP_COMPOSE_FILE:-}"
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   set -a; . "$ENV_FILE"; set +a
 fi
+POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-$_shell_container}"
+BACKUP_COMPOSE_FILE="${BACKUP_COMPOSE_FILE:-$_shell_compose_file}"
 
-: "${POSTGRES_HOST:?POSTGRES_HOST não definido}"
+# POSTGRES_CONTAINER vazio = modo host (pg_dump local, como sempre).
+# Com valor = modo container: o dump sai de dentro do container do Postgres
+# (docker compose exec), então POSTGRES_HOST/PORT não são usados.
+if [[ -z "$POSTGRES_CONTAINER" ]]; then
+  : "${POSTGRES_HOST:?POSTGRES_HOST não definido}"
+fi
 : "${POSTGRES_DB:?POSTGRES_DB não definido}"
 : "${POSTGRES_USER:?POSTGRES_USER não definido}"
+if [[ -z "${BACKUP_COMPOSE_FILE:-}" ]]; then
+  BACKUP_COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.yml"
+fi
+if [[ -n "$POSTGRES_CONTAINER" ]]; then
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "[backup] ERRO: POSTGRES_CONTAINER=$POSTGRES_CONTAINER, mas docker não está no PATH" >&2
+    exit 1
+  fi
+  if [[ ! -f "$BACKUP_COMPOSE_FILE" ]]; then
+    echo "[backup] ERRO: BACKUP_COMPOSE_FILE não encontrado: $BACKUP_COMPOSE_FILE" >&2
+    exit 1
+  fi
+fi
+
 : "${RCLONE_REMOTE_NAME:=r2}"
 RCLONE_BUCKET="${RCLONE_BUCKET:-}"
 BACKUP_ENCRYPT_PASSPHRASE="${BACKUP_ENCRYPT_PASSPHRASE:-}"
@@ -144,16 +188,27 @@ else
 fi
 
 echo "[backup] gerando $PLAIN_FILE (formato custom, comprimido)"
-PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_dump \
-  -h "$POSTGRES_HOST" \
-  -p "${POSTGRES_PORT:-5432}" \
-  -U "$POSTGRES_USER" \
-  -d "$POSTGRES_DB" \
-  -Fc \
-  -Z 9 \
-  --no-owner \
-  --no-privileges \
-  -f "$PLAIN_FILE"
+if [[ -n "$POSTGRES_CONTAINER" ]]; then
+  # Dentro do container o socket local é trust: sem PGPASSWORD e sem host/porta.
+  docker compose -f "$BACKUP_COMPOSE_FILE" exec -T "$POSTGRES_CONTAINER" \
+    pg_dump \
+    -U "$POSTGRES_USER" \
+    -d "$POSTGRES_DB" \
+    -Fc \
+    -Z 9 \
+    --no-owner \
+    --no-privileges >"$PLAIN_FILE"
+else
+  PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_dump \
+    -h "$POSTGRES_HOST" \
+    -p "${POSTGRES_PORT:-5432}" \
+    -U "$POSTGRES_USER" \
+    -d "$POSTGRES_DB" \
+    -Fc \
+    -Z 9 \
+    --no-owner \
+    --no-privileges >"$PLAIN_FILE"
+fi
 chmod 600 "$PLAIN_FILE"
 
 # Sanidade: arquivo não vazio E legível pelo pg_restore (formato custom válido).
@@ -161,9 +216,17 @@ if [[ ! -s "$PLAIN_FILE" ]]; then
   echo "[backup] ERRO: dump vazio: $PLAIN_FILE" >&2
   exit 1
 fi
-if ! pg_restore --list "$PLAIN_FILE" >/dev/null; then
-  echo "[backup] ERRO: dump ilegível (pg_restore --list falhou): $PLAIN_FILE" >&2
-  exit 1
+if [[ -n "$POSTGRES_CONTAINER" ]]; then
+  # O host pode não ter pg_restore: a listagem roda no container, dump via stdin.
+  if ! docker compose -f "$BACKUP_COMPOSE_FILE" exec -T "$POSTGRES_CONTAINER" pg_restore --list <"$PLAIN_FILE" >/dev/null; then
+    echo "[backup] ERRO: dump ilegível (pg_restore --list falhou): $PLAIN_FILE" >&2
+    exit 1
+  fi
+else
+  if ! pg_restore --list "$PLAIN_FILE" >/dev/null; then
+    echo "[backup] ERRO: dump ilegível (pg_restore --list falhou): $PLAIN_FILE" >&2
+    exit 1
+  fi
 fi
 
 if [[ -n "$BACKUP_ENCRYPT_PASSPHRASE" ]]; then

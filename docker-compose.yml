@@ -6,6 +6,12 @@
 #   - observability: otel-collector + tempo + prometheus + grafana
 # Serviços core SEM profile: o Coolify roda `docker compose up -d` sem
 # `--profile` e serviço com profile não sobe.
+#
+# Portas: este arquivo é o artefato de deploy e NÃO publica porta no host
+# (api e postgres ficam só com `expose:`). Quem publica 127.0.0.1:8000 e
+# 127.0.0.1:5432 no dev local é o `docker-compose.override.yml`, mesclado
+# automaticamente pelo `docker compose` sem `-f`. O Coolify e o CI usam `-f`
+# explícito e portanto ignoram o override.
 # =============================================================================
 name: lean-monorepo
 
@@ -19,16 +25,53 @@ services:
     image: postgres:18-alpine
     container_name: lm_postgres
     restart: unless-stopped
+    # Shutdown com folga: o Postgres precisa fechar as conexões e fechar o
+    # checkpoint antes do SIGKILL (o default do Docker são 10s).
+    stop_grace_period: 30s
     # Defaults (app/app) são só para dev local; sobrescreva em qualquer ambiente real.
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-app}
       POSTGRES_USER: ${POSTGRES_USER:-app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
       TZ: ${TZ:-UTC}
-    ports:
-      # publicado só em loopback — os scripts de backup rodam no host; a
-      # internet não fala com o Postgres
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    # Tuning do Postgres versionado (docs/tuning.md §2). O `command:` é a fonte
+    # da verdade: NÃO use ALTER SYSTEM (o valor fica preso no postgresql.auto.conf
+    # dentro do volume pgdata e some quando o volume é recriado).
+    # shared_buffers/effective_cache_size dependem da RAM do host — ajuste no
+    # .env da VPS (tabela por faixa em docs/tuning.md). Os defaults abaixo
+    # valem de 2 GB para cima; o alvo do repo (8 GB) é 2GB/6GB.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-3GB}
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
+      # max_connections fica no default (100): o pgbouncer existe justamente
+      # para não precisar subir esse teto (e a API sem pooler ainda pode abrir
+      # DB_POOL_SIZE + DB_MAX_OVERFLOW = 30 conexões).
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - min_wal_size=1GB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - log_min_duration_statement=500ms
+      - -c
+      - jit=off
+    expose:
+      # Sem porta publicada no host: o backup/restore em prod roda por
+      # `docker compose exec` (ver scripts/backup.sh) e o Coolify fala com o
+      # container pela rede Docker.
+      - "5432"
     volumes:
       - pgdata:/var/lib/postgresql
       - ./scripts/postgres-init:/docker-entrypoint-initdb.d:ro
@@ -37,6 +80,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+      # Volume novo: initdb + scripts de init levam mais de 50s numa VPS. O
+      # primeiro probe só roda depois do start_period, e falha durante ele não
+      # conta como retry (o healthcheck não estoura no 1º deploy).
+      start_period: 60s
 
   # ---- pgbouncer: pooler de conexao da API (AD-037) -----------------------
   # Sem `profiles:` pelo mesmo motivo dos demais servicos core (bug #6395 do
@@ -97,7 +144,7 @@ services:
   # Só `citext` é exigida (a migration cria). As extensões contrib de
   # `scripts/postgres-init` (pg_trgm/ltree/pgcrypto/...) já vêm na imagem
   # oficial; `vector` e `pg_cron` não vêm e nada no app as usa hoje.
-  # Passo a passo: README, "Trocar para Postgres gerenciado".
+  # Passo a passo: docs/deploy.md, "Trocar para Postgres gerenciado".
 
   # ---- Mailpit: SMTP server com web UI para dev/test ----------------------
   # Captura emails enviados pelo SmtpProvider. Ver em http://localhost:8025
@@ -112,13 +159,20 @@ services:
       MP4_SMTP_AUTH_ACCEPT_ANY: 1
       MP4_SMTP_AUTH_ALLOW_INSECURE: 1
     ports:
-      - "1025:1025"   # SMTP
-      - "8025:8025"   # Web UI
+      # Loopback: o relay SMTP accept-any e a UI ficam só na máquina. Em 0.0.0.0
+      # (o default do Compose) a VPS exporia um SMTP aberto para a internet.
+      - "127.0.0.1:1025:1025"   # SMTP
+      - "127.0.0.1:8025:8025"   # Web UI
 
   # ---- Migrations one-shot: roda uma vez e sai ----------------------------
   # api e worker dependem de `service_completed_successfully`, então o
   # `alembic upgrade head` acontece uma única vez (sem corrida entre eles).
+  # `migrate`, `api` e `worker` apontam para a MESMA tag (${APP_IMAGE}): o
+  # build é feito uma vez por deploy e os três containers saem do mesmo
+  # artefato — sem `image:`, o Compose criaria uma tag por serviço e o
+  # Coolify.buildaria a mesma imagem três vezes.
   migrate:
+    image: ${APP_IMAGE:-lean-monorepo:local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -141,6 +195,7 @@ services:
     command: ["bash", "-lc", "/app/scripts/entrypoint.sh migrate"]
 
   api:
+    image: ${APP_IMAGE:-lean-monorepo:local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -155,10 +210,11 @@ services:
       # Vazio = DSN direto (POSTGRES_*/DATABASE_URL). Defina no .env para usar
       # o pooler: postgresql+asyncpg://app:app@pgbouncer:6432/app
       DATABASE_URL_POOLER: ${DATABASE_URL_POOLER:-}
-    ports:
-      # publicado só em loopback — o proxy (Coolify) fala com o container pelo
-      # IP da rede Docker; em 0.0.0.0 a origem burlaria o proxy
-      - "127.0.0.1:${API_PORT:-8000}:8000"
+    expose:
+      # Porta interna do container. No Coolify o proxy (Traefik) fala com o
+      # container pelo IP da rede Docker; no dominio, o sufixo precisa ser
+      # :8000. As portas de dev local vivem em docker-compose.override.yml.
+      - "8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -169,6 +225,7 @@ services:
     command: ["bash", "-lc", "/app/scripts/entrypoint.sh api"]
 
   worker:
+    image: ${APP_IMAGE:-lean-monorepo:local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -203,8 +260,11 @@ services:
     volumes:
       - ./scripts/otel-collector.yaml:/etc/otel/config.yaml:ro
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
+      # Loopback: o app injeta OTLP por `otel-collector:4317` (rede Docker) e o
+      # Prometheus scrapeia `otel-collector:8889` — o publish no host não é
+      # usado por nada do stack e, em 0.0.0.0, seria um ingest OTLP aberto.
+      - "127.0.0.1:4317:4317"   # OTLP gRPC
+      - "127.0.0.1:4318:4318"   # OTLP HTTP
 
   tempo:
     image: grafana/tempo:2.6.0
@@ -216,7 +276,7 @@ services:
       - ./scripts/tempo.yaml:/etc/tempo.yaml:ro
       - tempo-data:/var/tempo
     ports:
-      - "3200:3200"   # tempo API
+      - "127.0.0.1:3200:3200"   # tempo API
 
   prometheus:
     image: prom/prometheus:v3.0.1
@@ -227,7 +287,7 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./scripts/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prom-data:/prometheus
@@ -244,7 +304,9 @@ services:
       # o profile observability.
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?defina GRAFANA_ADMIN_PASSWORD (a interpolação do Compose é global: o deploy falha sem ela, mesmo sem o profile observability)}"
     ports:
-      - "3000:3000"
+      # Loopback: o Grafana fica atrás do proxy do Coolify (ou de um tunnel) —
+      # em 0.0.0.0 ele ficaria público na porta 3000 da VPS.
+      - "127.0.0.1:3000:3000"
     volumes:
       - grafana-data:/var/lib/grafana
 

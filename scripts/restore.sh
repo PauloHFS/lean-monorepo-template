@@ -9,6 +9,18 @@
 #   - Sem --yes, pede confirmação interativa; sem TTY, recusa.
 #   - O dump é validado com `pg_restore --list` antes de qualquer escrita e
 #     NUNCA é apagado.
+#
+# Variáveis:
+#   POSTGRES_USER (obrigatória), POSTGRES_DB (avisa se o alvo é o banco origem)
+#   POSTGRES_HOST (obrigatória só no modo host), POSTGRES_PASSWORD, POSTGRES_PORT (5432)
+#   POSTGRES_CONTAINER (vazio = modo host; com valor = modo container)
+#   BACKUP_COMPOSE_FILE (default: <repo>/docker-compose.yml; usado no modo container)
+#   POSTGRES_RESTORE_DB (banco de destino alternativo ao --db)
+#
+# Modo container (POSTGRES_CONTAINER preenchido):
+#   No deploy do Coolify a porta do Postgres não é publicada no host, então o
+#   dump (lido do host) é streamed para o pg_restore do container via stdin
+#   (docker compose exec). O destino continua sendo explícito (--db).
 # =============================================================================
 set -euo pipefail
 
@@ -25,6 +37,18 @@ Opções:
 Conexão (env ou .env): POSTGRES_HOST, POSTGRES_PORT (5432),
   POSTGRES_USER, POSTGRES_PASSWORD, ENV_FILE (default: .env).
 
+Variáveis:
+  POSTGRES_CONTAINER                             vazio = modo host (pg_restore local)
+  BACKUP_COMPOSE_FILE                                   default: <repo>/docker-compose.yml
+  POSTGRES_RESTORE_DB                            banco de destino (alternativa ao --db)
+
+Modo container (POSTGRES_CONTAINER preenchido):
+  O dump é lido do host e streamed para o pg_restore do container via stdin
+  (`docker compose -f BACKUP_COMPOSE_FILE exec -T <serviço> pg_restore`). Use quando a
+  porta do Postgres não é publicada no host (deploy do Coolify): nesse modo
+  POSTGRES_HOST/POSTGRES_PORT não são necessários e o host não precisa ter
+  pg_restore.
+
 Exemplos:
   # inspecionar o dump sem restaurar
   ./scripts/restore.sh /tmp/lean-monorepo-backups/app_20240101T033000Z.dump --dry-run
@@ -35,6 +59,9 @@ Exemplos:
 
   # restaurar pedindo confirmação interativa
   POSTGRES_RESTORE_DB=app_restore_test ./scripts/restore.sh app.dump
+
+  # restaurar rodando o pg_restore dentro do container do Postgres
+  POSTGRES_CONTAINER=postgres ./scripts/restore.sh app.dump --db app --yes
 EOF
 }
 
@@ -102,22 +129,52 @@ if [[ ! -r "$DUMP" ]]; then
   echo "[restore] ERRO: arquivo sem permissão de leitura: $DUMP" >&2
   exit 1
 fi
-if ! command -v pg_restore >/dev/null 2>&1; then
-  echo "[restore] ERRO: pg_restore não encontrado no PATH" >&2
-  exit 1
-fi
 
 # Carrega .env se existir (depois do --help, para a ajuda não exigir ambiente).
 ENV_FILE="${ENV_FILE:-.env}"
+# O .env tem precedência (semântica já existente no script), mas um valor VAZIO
+# no .env não pode apagar o que veio do shell (POSTGRES_CONTAINER=postgres
+# ./scripts/restore.sh ... precisa vencer o `POSTGRES_CONTAINER=` do .env).
+_shell_container="${POSTGRES_CONTAINER:-}"
+_shell_compose_file="${BACKUP_COMPOSE_FILE:-}"
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   set -a; . "$ENV_FILE"; set +a
 fi
+POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-$_shell_container}"
+BACKUP_COMPOSE_FILE="${BACKUP_COMPOSE_FILE:-$_shell_compose_file}"
+
+# POSTGRES_CONTAINER vazio = modo host (pg_restore local, como sempre).
+# Com valor = modo container: o dump do host é streamed para o pg_restore do
+# container via stdin (docker compose exec).
+if [[ -z "${BACKUP_COMPOSE_FILE:-}" ]]; then
+  BACKUP_COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.yml"
+fi
+if [[ -n "$POSTGRES_CONTAINER" ]]; then
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "[restore] ERRO: POSTGRES_CONTAINER=$POSTGRES_CONTAINER, mas docker não está no PATH" >&2
+    exit 1
+  fi
+  if [[ ! -f "$BACKUP_COMPOSE_FILE" ]]; then
+    echo "[restore] ERRO: BACKUP_COMPOSE_FILE não encontrado: $BACKUP_COMPOSE_FILE" >&2
+    exit 1
+  fi
+elif ! command -v pg_restore >/dev/null 2>&1; then
+  echo "[restore] ERRO: pg_restore não encontrado no PATH" >&2
+  exit 1
+fi
 
 # Valida o dump antes de qualquer coisa.
-if ! LIST="$(pg_restore --list "$DUMP")"; then
-  echo "[restore] ERRO: pg_restore --list falhou; dump inválido/ilegível: $DUMP" >&2
-  exit 1
+if [[ -n "$POSTGRES_CONTAINER" ]]; then
+  if ! LIST="$(docker compose -f "$BACKUP_COMPOSE_FILE" exec -T "$POSTGRES_CONTAINER" pg_restore --list <"$DUMP")"; then
+    echo "[restore] ERRO: pg_restore --list falhou; dump inválido/ilegível: $DUMP" >&2
+    exit 1
+  fi
+else
+  if ! LIST="$(pg_restore --list "$DUMP")"; then
+    echo "[restore] ERRO: pg_restore --list falhou; dump inválido/ilegível: $DUMP" >&2
+    exit 1
+  fi
 fi
 ENTRY_COUNT="$(printf '%s\n' "$LIST" | grep -cE '^[0-9]+;' || true)"
 ENTRY_COUNT="${ENTRY_COUNT:-0}"
@@ -135,7 +192,9 @@ if [[ -z "$TARGET_DB" ]]; then
   exit 1
 fi
 
-: "${POSTGRES_HOST:?POSTGRES_HOST não definido (exporte ou use .env)}"
+if [[ -z "$POSTGRES_CONTAINER" ]]; then
+  : "${POSTGRES_HOST:?POSTGRES_HOST não definido (exporte ou use .env)}"
+fi
 : "${POSTGRES_USER:?POSTGRES_USER não definido (exporte ou use .env)}"
 
 if [[ -n "${POSTGRES_DB:-}" && "$TARGET_DB" == "$POSTGRES_DB" ]]; then
@@ -156,13 +215,23 @@ if [[ "$ASSUME_YES" -ne 1 ]]; then
 fi
 
 echo "[restore] restaurando $(basename "$DUMP") em '$TARGET_DB' (${ENTRY_COUNT} entradas)"
-PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_restore \
-  --host "$POSTGRES_HOST" \
-  --port "${POSTGRES_PORT:-5432}" \
-  --username "$POSTGRES_USER" \
-  --dbname "$TARGET_DB" \
-  --clean --if-exists \
-  --no-owner --no-privileges \
-  "$DUMP"
+if [[ -n "$POSTGRES_CONTAINER" ]]; then
+  # Dentro do container o socket local é trust: sem PGPASSWORD e sem host/porta.
+  docker compose -f "$BACKUP_COMPOSE_FILE" exec -T "$POSTGRES_CONTAINER" \
+    pg_restore \
+    -U "$POSTGRES_USER" \
+    --dbname "$TARGET_DB" \
+    --clean --if-exists \
+    --no-owner --no-privileges <"$DUMP"
+else
+  PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_restore \
+    --host "$POSTGRES_HOST" \
+    --port "${POSTGRES_PORT:-5432}" \
+    --username "$POSTGRES_USER" \
+    --dbname "$TARGET_DB" \
+    --clean --if-exists \
+    --no-owner --no-privileges \
+    "$DUMP"
+fi
 
 echo "[restore] ok: ${ENTRY_COUNT} entradas restauradas em '$TARGET_DB' (dump preservado em $DUMP)"

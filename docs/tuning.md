@@ -56,7 +56,7 @@ O que cada um faz, em uma linha:
 - `log_min_duration_statement`: loga query acima de 500 ms — o começo de qualquer investigação.
 - `jit`: compilação em tempo de execução; desligado para OLTP curto.
 
-**Onde aplicar**: no `command:` do serviço `postgres` do **compose**, versionado junto do projeto (sobrevive a recreate e o Coolify não sobrescreve):
+**Onde aplicar**: já está no `command:` do serviço `postgres` do **compose**, versionado junto do projeto (sobrevive a recreate e o Coolify não sobrescreve). Os dois knobs que dependem da RAM vêm do `.env` (a tabela acima é a referência):
 
 ```yaml
   postgres:
@@ -64,15 +64,13 @@ O que cada um faz, em uma linha:
     command:
       - postgres
       - -c
-      - shared_buffers=2GB
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
       - -c
-      - effective_cache_size=6GB
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-3GB}
       - -c
-      - work_mem=32MB
+      - work_mem=16MB
       - -c
-      - maintenance_work_mem=512MB
-      - -c
-      - max_connections=60
+      - maintenance_work_mem=256MB
       - -c
       - max_wal_size=4GB
       - -c
@@ -88,6 +86,10 @@ O que cada um faz, em uma linha:
       - -c
       - jit=off
 ```
+
+- `POSTGRES_SHARED_BUFFERS` e `POSTGRES_EFFECTIVE_CACHE_SIZE`: defaults `1GB`/`3GB` no compose (valem de 2 GB de RAM para cima). Na VPS de 8 GB do repo, defina `2GB`/`6GB` no `.env`.
+- `work_mem` e `maintenance_work_mem` estão fixos no valor da faixa de 4 GB (`16MB`/`256MB`) — suba-os no `command:` se a sua faixa for maior.
+- `max_connections` fica no default (100): o pgbouncer existe justamente para não precisar subir esse teto, e a API sem pooler ainda pode abrir `DB_POOL_SIZE` + `DB_MAX_OVERFLOW` = 30 conexões por processo.
 
 **Não use `ALTER SYSTEM`** para isso: o valor fica preso no `postgresql.auto.conf` dentro do volume `pgdata`, fora do Git, e some/diverge quando o volume é recriado ou o banco é restaurado em outro host. `command:` é a fonte de verdade versionada.
 

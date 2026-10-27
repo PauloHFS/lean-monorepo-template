@@ -273,31 +273,36 @@ jobs:
         run: |
           set -euo pipefail
           cp .env.example .env
-          if ! docker compose up -d; then
-            docker compose logs migrate api || true
+          # `-f` explicito: o compose de prod (sem porta publicada no host) e o
+          # que roda no Coolify. O override local e ignorado de proposito.
+          if ! docker compose -f docker-compose.yml up -d; then
+            docker compose -f docker-compose.yml logs migrate api || true
             exit 1
           fi
-          # api tem que responder readiness com o banco de pé
+          # api tem que responder readiness com o banco de pe. Sem porta
+          # publicada no host, o probe roda DENTRO do container da api
+          # (/opt/venv/bin/python existe na imagem; o venv esta no PATH).
+          healthz() {
+            docker compose -f docker-compose.yml exec -T api /opt/venv/bin/python -c \
+              "import json, urllib.request; b = json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/healthz', timeout=5)); assert b.get('db') is True, b; print(json.dumps(b))" || return 1
+          }
           for _ in $(seq 1 30); do
-            if curl -fs http://127.0.0.1:8000/api/v1/healthz 2>/dev/null | grep -q '"db":true'; then
-              break
-            fi
+            if healthz; then break; fi
             sleep 2
           done
-          curl -fsS http://127.0.0.1:8000/api/v1/healthz
-          echo
+          healthz
           # migration aplicada de verdade (psql direto no container postgres:
           # o pooler nao serve DDL/sessao persistente)
-          docker compose exec -T postgres psql -U app -d app \
+          docker compose -f docker-compose.yml exec -T postgres psql -U app -d app \
             -c 'select version_num from alembic_version'
           # worker vivo
-          docker compose ps --services --filter status=running | grep -qx worker
+          docker compose -f docker-compose.yml ps --services --filter status=running | grep -qx worker
           # pgbouncer no ar e a rota do pooler responde (o psql esta no
           # container postgres; a senha vem do proprio container)
-          docker compose ps --services --filter status=running | grep -qx pgbouncer
-          docker compose exec -T postgres sh -c \
+          docker compose -f docker-compose.yml ps --services --filter status=running | grep -qx pgbouncer
+          docker compose -f docker-compose.yml exec -T postgres sh -c \
             'PGPASSWORD="$POSTGRES_PASSWORD" psql -h pgbouncer -p 6432 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select 1"'
-          docker compose down -v
+          docker compose -f docker-compose.yml down -v
 
       - name: Trivy (vulns na imagem)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
