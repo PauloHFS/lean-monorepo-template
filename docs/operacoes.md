@@ -105,7 +105,7 @@ EMAIL_LOG_ONLY=true   # só loga, não envia
 
 `../.github/workflows/restore-test.yml` roda backup → restore → verificação num Postgres efêmero.
 
-`../.github/workflows/deploy.yml` publica a imagem no GHCR em push na `main`/tag `v*`, gera SBOM SPDX com syft e assina imagem + SBOM com cosign keyless (OIDC). As actions do CI e do deploy são pinadas por **commit SHA**; o Dependabot abre PRs semanais para pip, npm, GitHub Actions e Docker.
+`../.github/workflows/deploy.yml` publica a imagem no GHCR em tags `v*` (ou sob demanda via `workflow_dispatch`), gera SBOM SPDX com syft e assina imagem + SBOM com cosign keyless (OIDC). As actions do CI e do deploy são pinadas por **commit SHA**; o Dependabot abre PRs semanais para pip, npm, GitHub Actions e Docker.
 
 Local: `just ci` roda os mesmos checks (backend, frontend, semgrep, auditorias, E2E mock, schema e compose). O `validate-compose` materializa um `.env` a partir do `../.env.example` se não houver um e usa `GRAFANA_ADMIN_PASSWORD=validation-only` quando a variável está ausente/vazia — não é preciso passá-la na invocação. O build da imagem, a medição do tamanho, o Trivy e a prova de restauração só rodam no CI (exigem daemon).
 

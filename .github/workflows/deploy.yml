@@ -1,11 +1,11 @@
 name: deploy
 
-# Publica a imagem no GHCR a cada push na main e a cada tag v*.
-# O job `docker` do ci.yml continua sendo o gate de vulnerabilidades (Trivy);
-# aqui reusamos os mesmos build args e entregamos a imagem ja validada.
+# Publica a imagem no GHCR sob demanda (workflow_dispatch) ou em tags de release (v*).
+# No dia a dia o deploy roda direto no Coolify via docker-compose.yml (apos o ci.yml
+# validar testes, SAST, Trivy e o boot do stack).
 on:
+  workflow_dispatch:
   push:
-    branches: [main]
     tags: ["v*"]
 
 concurrency:

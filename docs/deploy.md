@@ -19,7 +19,7 @@ O repositório serve **HTTP puro**. **TLS é requisito de deployment**: coloque 
 - **Mailpit**: fica atrás do profile `dev` e não sobe no `docker compose up` padrão. Use `docker compose --profile dev up -d mailpit` quando precisar capturar e-mail local.
 - **Docs desligados**: em prod `/api/docs`, `/api/redoc` e `/api/openapi.json` não existem. HSTS e CSP só são aplicados em prod.
 - **Backup**: `BACKUP_ENCRYPT_PASSPHRASE` cifra o dump (AES-256-CBC/PBKDF2) antes de manter/enviar; sem ela o dump sai em claro e o script avisa. Os dumps são `0600`; `BACKUP_KEEP_COUNT` controla a retenção local (default 14).
-- **Entrega**: `.github/workflows/deploy.yml` publica no GHCR a cada push na `main`/tag `v*` e anexa SBOM SPDX (syft) + assinatura keyless (cosign/OIDC). As actions são pinadas por commit SHA; o Dependabot abre PRs semanais para pip, npm, GitHub Actions e Docker.
+- **Entrega**: `.github/workflows/deploy.yml` publica no GHCR em tags `v*` (ou sob demanda via `workflow_dispatch`) e anexa SBOM SPDX (syft) + assinatura keyless (cosign/OIDC); no dia a dia o Coolify faz o deploy direto do `docker-compose.yml` após o `ci.yml` validar a `main`. As actions são pinadas por commit SHA; o Dependabot abre PRs semanais para pip, npm, GitHub Actions e Docker.
 
 ---
 
