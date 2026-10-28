@@ -5,7 +5,9 @@ from __future__ import annotations
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 from pydantic import ValidationError
+from sqlalchemy.engine import make_url
 
 from app.core.config import Settings
 from app.db.session import apply_sslmode
@@ -96,3 +98,39 @@ def test_apply_sslmode_replaces_existing_value() -> None:
     result = apply_sslmode(dsn, "require")
 
     assert parse_qs(urlsplit(result).query) == {"sslmode": ["require"]}
+
+
+@pytest.mark.parametrize(
+    "password",
+    [
+        "Ifa5q/ZB1eCoA9lYTDynJPpJNT7Ebo5B",  # "/" quebra a DSN sem encoding
+        "p@ssw0rd",
+        "senha#com#hash",
+        "senha:com:dois-pontos",
+        "senha?com?query",
+        "senha%com%percent",
+        "senha com espaco",
+    ],
+)
+def test_dsn_encodes_url_unsafe_credentials(password: str) -> None:
+    """Senha com caractere de URL não pode derrubar o import do config.
+
+    `PostgresDsn.build()` não escapa as credenciais: com "/" na senha a DSN
+    fica inválida (`invalid port number`) e o `migrate` morre antes de rodar
+    a migration. As credenciais precisam ir percent-encoded.
+    """
+    settings = Settings(
+        app_env="local",
+        postgres_user="app",
+        postgres_password=password,
+        postgres_host="postgres",
+        postgres_port=5432,
+        postgres_db="app",
+    )
+
+    assert "%2F" in settings.database_url_async or "/" not in password
+
+    # Round-trip: quem consome a DSN tem que receber a senha original.
+    assert make_url(settings.database_url_async).password == password
+    assert make_url(settings.database_url_sync).password == password
+    assert conninfo_to_dict(settings.database_url_procrastinate)["password"] == password

@@ -35,7 +35,7 @@ O repo **não embute proxy**: a app sobe HTTP puro e o TLS termina no proxy do C
    SECRET_KEY=<32+ chars aleatórios>
    COOKIE_SECURE=true
    WEB_ORIGIN=https://app.example.com
-   POSTGRES_PASSWORD=<senha forte>
+   POSTGRES_PASSWORD=<senha forte>        # caracteres especiais (/, @, #, ?) são percent-encoded automaticamente na DSN
    POSTGRES_SHARED_BUFFERS=2GB            # tuning por RAM (docs/tuning.md §2)
    POSTGRES_EFFECTIVE_CACHE_SIZE=6GB      # 8 GB de RAM; default do compose: 1GB/3GB
    DATABASE_URL=
@@ -46,10 +46,13 @@ O repo **não embute proxy**: a app sobe HTTP puro e o TLS termina no proxy do C
    Preencha `DATABASE_URL` **ou** os `POSTGRES_*` (dentro do compose o host do banco é `postgres`); em Postgres gerenciado, defina `DB_SSLMODE=require`. `GRAFANA_ADMIN_PASSWORD` é exigida **mesmo sem** o profile `observability`: a interpolação `${GRAFANA_ADMIN_PASSWORD:?...}` do Compose é global. O `.env` versionado no repo **não é lido**: o Coolify gera/sobrescreve o `.env` do diretório de deploy e injeta `env_file: ['.env']` — a fonte é a UI.
 
    `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER` e `POSTGRES_DB` **não precisam** ir no `.env` do Coolify: o `environment:` do compose define `POSTGRES_HOST: postgres` e sobrescreve o `env_file` (o mesmo `POSTGRES_PASSWORD` do banco e do app é replicado pelo compose). E **não mude `API_INTERNAL_PORT`** (default 8000): o `expose:` do serviço `api` está acoplado a ele.
-3. **Domínio**: só no serviço `api`, com o campo **Port = `8000`** (a porta **do container**). O `docker-compose.yml` não publica porta no host (só `expose:`), então o sufixo é obrigatório — sem ele o proxy procura a app na porta errada e devolve 502. No formulário do Coolify:
-   - **Domain**: `app.example.com` (o sufixo `:8000` também é aceito no próprio campo);
-   - **Port**: `8000` — **campo explícito**, porque não há `ports:` publicado para o Coolify detectar;
-   - **Health Check Path**: `/api/v1/livez` (liveness; não toca o banco) ou vazio — a imagem já tem `HEALTHCHECK`.
+3. **Domínio (SPA + API na mesma origem — AD-005)**:
+   - O container `api` serve **tanto o frontend compilado (`apps/web/dist` em `/` e `/assets/*`) quanto a API (`/api/v1/*`) no mesmo domínio**. Em `APP_ENV=prod` o CORS é desligado por design e os cookies (`HttpOnly; Secure; SameSite=Lax`) + cerimônia WebAuthn/Passkey exigem uma única origem (`WEB_ORIGIN`). Portanto, você precisa de **um único domínio** (ex.: `https://app.example.com`) apontando para o serviço `api`.
+   - Configure só no serviço `api`, obrigatoriamente com esquema **`https://`** e **Port = `8000`** (ex.: `https://app.example.com:8000`). O `docker-compose.yml` não publica porta no host (só `expose:`), então o sufixo `:8000` é obrigatório — sem ele o proxy procura a app na porta errada e devolve 502; e sem `https://` o Traefik cria router só no entrypoint `http` (porta 80), deixando a aplicação sem certificado TLS e sem QUIC/HTTP3 (a Cloudflare em modo *Full (Strict)* devolverá erro **526 Invalid SSL certificate**).
+   - No formulário do Coolify:
+     - **Domain**: `https://app.example.com:8000` (o Coolify extrai `:8000` para `domain_port_overrides`);
+     - **Port**: `8000` — **campo explícito**, porque não há `ports:` publicado para o Coolify detectar;
+     - **Health Check Path**: `/api/v1/livez` (liveness; não toca o banco) ou vazio — a imagem já tem `HEALTHCHECK`.
 
    O proxy (Traefik) fala com o container pelo IP da rede Docker, nunca por `127.0.0.1`.
 4. **Borda** — escolha uma:
@@ -115,12 +118,74 @@ O backup **lógico** da Coolify (`pg_dump` + **"Import Backup"**) só existe par
 
 ---
 
-## TLS com Cloudflare (DNS-01)
+## Cloudflare + Traefik (DNS-01, IPs reais, QUIC/BBR e Zero Trust)
 
-O ACME **HTTP-01** padrão exige rota pública (não completa com o proxy laranja da Cloudflare nem atrás do tunnel). Para emitir via **DNS-01** no Traefik da Coolify:
+Quando a VPS fica longe dos usuários (ex.: VPS na Europa atendendo usuários no Brasil), o proxy da Cloudflare (**nuvem laranja**) é essencial para terminar a conexão QUIC/TLS na borda local (~10–35 ms), entregar os assets estáticos cacheados no país do usuário e manter conexões aquecidas até a VPS sobre TCP **BBR**.
 
-- env `CF_DNS_API_TOKEN=<token do Cloudflare com permissão "Edit zone DNS">`;
-- comando custom do proxy `--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare`.
+### 1. Configurações no painel da Cloudflare
+
+1. **DNS (`DNS` → `Records`)**:
+   - Crie registros **`A`** (IPv4 da VPS) e **`AAAA`** (IPv6 da VPS) com **Proxy status = Proxied (nuvem laranja)** para o domínio da aplicação (ex.: `app.example.com`) e para o subdomínio do próprio Coolify (ex.: `coolify.example.com`).
+   - *Atenção com wildcards*: se a zona tiver um `CNAME *` apontando para um Cloudflare Tunnel local, qualquer subdomínio explícito (`A`/`AAAA`) tem precedência no DNS sobre o wildcard `*`.
+2. **SSL/TLS (`SSL/TLS` → `Overview`)**:
+   - Modo de criptografia: **`Full (Strict)`** (nunca use *Flexible*; e prefira *Full (Strict)* em vez de *Automatic/Full* para validar o certificado Let's Encrypt do Traefik).
+   - **Origin connection & post-quantum encryption**: mantenha **`Automatic key exchange`** ligado (e as caixas de *Compliance requirements* desmarcadas). O Traefik v3.7 negocia troca de chaves pós-quântica híbrida (`X25519MLKEM768`) automaticamente e economiza 1 round-trip no handshake TLS entre Cloudflare e a origem.
+3. **Speed (`Speed` → `Optimization` → `Protocol Optimization`)**:
+   - **HTTP/2**: ON
+   - **HTTP/3 (with QUIC)**: ON
+   - **0-RTT Connection Resumption**: ON
+
+### 2. Token da Cloudflare e `coolify-proxy` (DNS-01 + Trusted IPs)
+
+O ACME **HTTP-01** padrão exige rota pública direta e falha em renovações atrás do proxy laranja ou proteção anti-bot da Cloudflare. Além disso, o **Integration Token** cadastrado na UI do Coolify (*Security → Integration Tokens*) sincroniza zonas e cria registros DNS automaticamente, mas **não é injetado sozinho** no container `coolify-proxy` (Traefik).
+
+Para configurar o Traefik do Coolify (**Servers → localhost → Proxy → Configuration**) de forma persistente (ou via `SaveProxyConfiguration` no banco do Coolify):
+
+1. Adicione a variável de ambiente `CF_DNS_API_TOKEN` no serviço `traefik` (pode ser o mesmo token com permissão `Zone → DNS → Edit` usado no Integration Token do Coolify):
+   ```yaml
+   services:
+     traefik:
+       environment:
+         - CF_DNS_API_TOKEN=<token_cloudflare_edit_zone_dns>
+   ```
+2. Na lista `command:` do `traefik`, troque o `httpchallenge` por `dnschallenge` e declare os ranges IPv4 e IPv6 da Cloudflare em `forwardedHeaders.trustedIPs` nos entrypoints `http` e `https` (para que a API receba o IP real do cliente em `X-Forwarded-For` e o rate limit não agrupe todos os usuários no IP da borda):
+   ```yaml
+   command:
+     # ... manter flags existentes (--entrypoints.https.http3 já vem ativo no Coolify)
+     - '--entrypoints.http.forwardedHeaders.trustedIPs=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32'
+     - '--entrypoints.https.forwardedHeaders.trustedIPs=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32'
+     - '--certificatesresolvers.letsencrypt.acme.dnschallenge=true'
+     - '--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare'
+     - '--certificatesresolvers.letsencrypt.acme.storage=/traefik/acme.json'
+   ```
+3. Salve e recrie o proxy (`docker compose up -d --force-recreate` em `/data/coolify/proxy` ou botão **Restart Proxy**).
+
+### 3. BBR + QUIC no Kernel da VPS
+
+Certifique-se de que a VPS está com controle de congestionamento **BBR** + fila **`fq`** e buffers UDP de 16 MB (necessários para QUIC/HTTP3 e alto throughput em links transatlânticos):
+
+```bash
+sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc net.core.rmem_max net.core.wmem_max
+# Esperado:
+# net.ipv4.tcp_congestion_control = bbr
+# net.core.default_qdisc = fq
+# net.core.rmem_max = 16777216
+# net.core.wmem_max = 16777216
+```
+
+### 4. Acelerar e proteger o Dashboard do Coolify (Cloudflare + Zero Trust)
+
+Acessar o painel do Coolify direto pela porta `:8000` (mesmo via Tailscale) trafega quase **1 MB** de CSS/JS sem compressão Brotli/Zstd em HTTP/1.1 puro, levando >6s em links intercontinentais e desabilitando login por Passkey (que exige HTTPS).
+
+1. **Domínio da instância**: em **Settings → General → Instance's Domain**, defina `https://coolify.example.com` (com **Force HTTPS** habilitado). O Coolify gera `/data/coolify/proxy/dynamic/coolify.yaml` automaticamente; com a Cloudflare na frente, os assets (`/build/assets/*`) são comprimidos (~80% menores) e cacheados na borda local (~3x mais rápido no carregamento total), mantendo `http://<tailscale-ip>:8000` como acesso de contingência.
+2. **Proteção com Cloudflare Zero Trust (Access)**:
+   - Em [one.dash.cloudflare.com](https://one.dash.cloudflare.com/) → **Access → Applications → Add an application → Self-hosted (Public DNS)**:
+     - **Application name**: `Coolify` · **Session Duration**: `1 month` (`720 hours`)
+     - **Public hostname**: `coolify.example.com`
+     - **Access policy**: `Action = Allow`, regra `Include → Emails` com os e-mails dos administradores.
+     - **Authentication**: ative **Apply instant authentication** para pular a tela de seleção de provedor.
+     - **Additional settings → Cookie settings**: mantenha **HTTP Only** ligado e **Enable Binding Cookie** **desligado** (o Binding Cookie é incompatível com os WebSockets `wss://` de logs/status em tempo real do Coolify).
+   - **Bypass para Webhooks do GitHub** (se usar deploy automático por push): crie uma segunda aplicação/política para `coolify.example.com` com **Path = `webhooks/*`**, **Action = `Bypass`** e **Include = `Everyone`** (as rotas `/webhooks/*` já validam a assinatura HMAC do GitHub).
 
 ---
 

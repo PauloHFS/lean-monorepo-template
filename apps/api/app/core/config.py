@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import quote
 
 from pydantic import (
     AliasChoices,
@@ -20,6 +21,18 @@ from pydantic import (
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_SECRET_KEY = "change-me-please-32-bytes-minimum-aaaaaaaaaaaaaaaaaaaa"
+
+
+def _pg_creds(username: str, password: str) -> tuple[str, str]:
+    """Percent-encoda user/senha para montar a DSN.
+
+    `PostgresDsn.build()` não escapa as credenciais: uma senha com `/` (ou
+    `@`, `#`, `?`) quebra a URL — o `/` abre um novo caminho e o Pydantic
+    levanta `invalid port number` na importação do config (o `migrate` morre
+    antes de rodar a migration). O SQLAlchemy e o libpq des-escapam, então
+    encodes aqui é transparente.
+    """
+    return quote(username, safe=""), quote(password, safe="")
 
 
 class Settings(BaseSettings):
@@ -121,11 +134,12 @@ class Settings(BaseSettings):
     def database_url_async(self) -> str:
         if self.database_url:
             return self.database_url
+        user, password = _pg_creds(self.postgres_user, self.postgres_password)
         return str(
             PostgresDsn.build(
                 scheme="postgresql+asyncpg",
-                username=self.postgres_user,
-                password=self.postgres_password,
+                username=user,
+                password=password,
                 host=self.postgres_host,
                 port=self.postgres_port,
                 path=self.postgres_db,
@@ -146,11 +160,12 @@ class Settings(BaseSettings):
     def database_url_sync(self) -> str:
         if self.database_url:
             return self.database_url.replace("+asyncpg", "+psycopg2")
+        user, password = _pg_creds(self.postgres_user, self.postgres_password)
         return str(
             PostgresDsn.build(
                 scheme="postgresql+psycopg2",
-                username=self.postgres_user,
-                password=self.postgres_password,
+                username=user,
+                password=password,
                 host=self.postgres_host,
                 port=self.postgres_port,
                 path=self.postgres_db,
