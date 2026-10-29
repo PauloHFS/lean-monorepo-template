@@ -559,7 +559,7 @@ async def request_email_otp(payload: EmailOtpRequestIn, session: DB) -> OkOut:
 async def verify_email_otp(
     payload: EmailOtpVerifyIn, request: Request, response: Response, session: DB
 ) -> LoginOut:
-    """Valida o código OTP de 6 dígitos enviado por e-mail e inicia sessão (ou desafio 2FA)."""
+    """Valida o código OTP de 6 dígitos enviado por e-mail e inicia sessão (sem 2FA)."""
     await enforce_account_limit("otp.email.verify", payload.email, limit=10, window_s=300)
     email_fp = _email_fingerprint(payload.email)
     key = _email_otp_cache_key(payload.email)
@@ -609,36 +609,15 @@ async def verify_email_otp(
     if not row or not row["is_active"]:
         raise HTTPException(status_code=403, detail="user inactive")
 
-    methods: list[str] = []
-    if row["totp_enabled"]:
-        methods.append("totp")
-    pk = await session.execute(
-        text("SELECT 1 FROM user_passkeys WHERE user_id = :uid LIMIT 1"),
-        {"uid": row["id"]},
-    )
-    if pk.scalar_one_or_none():
-        methods.append("passkey")
-
+    # O código por e-mail já é prova de posse da caixa de entrada (fator único
+    # suficiente, padrão de mercado para passwordless): não exige 2FA adicional.
     log.info(
         "auth.otp.email.verify",
         outcome="success",
         email_fp=email_fp,
         user_id=str(row["id"]),
-        requires_2fa=bool(methods),
+        requires_2fa=False,
     )
-
-    if methods:
-        token = await totp_mod.store_pending(
-            str(row["id"]),
-            ip=request.client.host if request.client else None,
-            ua=request.headers.get("user-agent"),
-        )
-        return LoginOut(
-            requires_2fa=True,
-            pending_token=token,
-            methods=methods,
-            user=None,
-        )
 
     token = generate_session_token()
     await session.execute(
