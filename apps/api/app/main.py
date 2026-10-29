@@ -30,6 +30,8 @@ from app.core.observability import (
 )
 from app.db.session import engine
 from app.jobs.app import app as procrastinate_app
+from app.permissions import PermissionDenied
+from app.services.errors import NotFoundError
 
 log = get_logger("api.main")
 
@@ -130,6 +132,19 @@ else:
 # -----------------------------------------------------------------------------
 # Erros não tratados
 # -----------------------------------------------------------------------------
+@app.exception_handler(PermissionDenied)
+async def permission_denied_handler(request: Request, exc: PermissionDenied):
+    log.warning(
+        "permission.denied", action=exc.action.value, resource=exc.resource.value, reason=exc.reason
+    )
+    return JSONResponse(status_code=403, content={"detail": "forbidden"})
+
+
+@app.exception_handler(NotFoundError)
+async def not_found_handler(request: Request, exc: NotFoundError):
+    return JSONResponse(status_code=404, content={"detail": "not found"})
+
+
 @app.exception_handler(JobRateLimitExceeded)
 async def job_rate_limit_exceeded(request: Request, exc: JobRateLimitExceeded):  # noqa: ARG001
     """Rate limit de job enfileirado: 429, não 500."""

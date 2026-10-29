@@ -121,3 +121,27 @@ O trigger roda como invoker; sem o `INSERT` a DML na tabela auditada falha. Se a
 - Retenção **menor** que a dos dados de negócio e documentada. A limpeza pode seguir o padrão dos jobs de cleanup do template quando `pg_cron` está disponível.
 
 Guia extraído do README. Índice e atalhos: [README](../README.md).
+
+
+## Sistema de Autorização ABAC (Padrão Ouro)
+
+O projeto adota o padrão de Attribute-Based Access Control (ABAC) com **Single Source of Truth (SSOT)**:
+
+1. **Definição de Regras (`apps/api/app/permissions/rules.py`):**
+   - As regras são declarativas e residem exclusivamente neste arquivo.
+   - Suporte a granularidade de campos (`fields`: colunas liberadas para leitura/mutação).
+   - Condições avaliadas sobre o Ator, o Recurso e o Ambiente.
+
+2. **Database Pushdown (`apps/api/app/permissions/sql.py`):**
+   - Compila regras diretamente para predicados `WHERE` parametrizados com bind params (`to_sql()`).
+   - Garante que listagens em lote retornem apenas o que o ator tem direito de enxergar antes de chegar na memória.
+
+3. **Service Layer Desacoplada (`apps/api/app/services/`):**
+   - Os endpoints HTTP apenas validam esquemas e repassam a execução para os serviços (`users`, `outbound_email`).
+   - Toda checagem e mutação passa por `authorize()`.
+
+4. **Frontend em Paridade Estrita (`apps/web/src/lib/permissions/`):**
+   - O backend expõe o endpoint `GET /api/v1/permissions/me` com o manifesto de políticas do usuário.
+   - O frontend avalia as mesmas regras usando o motor em `src/lib/permissions/engine.ts` e o hook `usePermissions()`.
+   - O componente `<Can action="..." resource="...">` condiciona elementos visuais sem divergência de regra.
+   - Paridade 100% garantida pela suíte de conformance compartilhada (`permissions_conformance.json`).

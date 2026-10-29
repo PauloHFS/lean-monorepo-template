@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
 import pytest
-from fastapi import HTTPException
 from fastapi.dependencies.utils import get_dependant, request_params_to_args
 from fastapi.routing import APIRoute
 
 from app.api.v1.endpoints.users import delete_user, router
+from app.permissions import Actor, PermissionDenied, Role
+from app.services.errors import NotFoundError
 
 
 def _route(method: str, path: str) -> APIRoute:
@@ -71,35 +72,27 @@ def _fake_session(rowcount: int) -> Any:
 
 
 async def test_delete_user_forbids_other_regular_user() -> None:
-    user = SimpleNamespace(
-        id=UUID("00000000-0000-0000-0000-000000000001"), is_superuser=False, is_active=True
-    )
-    with pytest.raises(HTTPException) as exc:
+    actor = Actor(id=UUID("00000000-0000-0000-0000-000000000001"), role=Role.MEMBER, is_active=True)
+    with pytest.raises(PermissionDenied):
         await delete_user(
             UUID("00000000-0000-0000-0000-000000000002"),
-            cast(Any, user),
+            actor,
             _fake_session(rowcount=1),
         )
 
-    assert exc.value.status_code == 403
-
 
 async def test_delete_user_returns_404_when_nothing_was_deleted() -> None:
-    user = SimpleNamespace(
-        id=UUID("00000000-0000-0000-0000-000000000001"), is_superuser=True, is_active=True
-    )
-    with pytest.raises(HTTPException) as exc:
+    actor = Actor(id=UUID("00000000-0000-0000-0000-000000000001"), role=Role.ADMIN, is_active=True)
+    with pytest.raises(NotFoundError):
         await delete_user(
             UUID("00000000-0000-0000-0000-000000000002"),
-            cast(Any, user),
+            actor,
             _fake_session(rowcount=0),
         )
-
-    assert exc.value.status_code == 404
 
 
 async def test_delete_user_owner_succeeds() -> None:
     user_id = UUID("00000000-0000-0000-0000-000000000001")
-    user = SimpleNamespace(id=user_id, is_superuser=False, is_active=True)
+    actor = Actor(id=user_id, role=Role.MEMBER, is_active=True)
 
-    assert await delete_user(user_id, cast(Any, user), _fake_session(rowcount=1)) is None
+    assert await delete_user(user_id, actor, _fake_session(rowcount=1)) is None

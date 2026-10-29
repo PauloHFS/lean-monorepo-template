@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.security import hash_session_token
 from app.db.models.user import User
 from app.db.session import get_db
+from app.permissions import Actor, actor_from_user
 
 DB = Annotated[AsyncSession, Depends(get_db)]
 
@@ -52,3 +53,11 @@ async def get_current_user(request: Request, session: DB) -> User:
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def get_actor(user: CurrentUser) -> Actor:
+    """Ator das políticas ABAC, derivado do usuário da sessão."""
+    return actor_from_user(user)
+
+
+CurrentActor = Annotated[Actor, Depends(get_actor)]

@@ -20,6 +20,7 @@ import type {
   PasskeyRegisterOptionsOut,
   PasswordChangeIn,
   PendingIn,
+  PolicyOut,
   RegisterIn,
   ResetPasswordIn,
   TotpConfirmOut,
@@ -27,6 +28,7 @@ import type {
   TwoFactorStatusOut,
   TwoFactorVerifyIn,
   UserOut,
+  UserUpdateIn,
 } from './types'
 
 export const AuthApi = {
@@ -51,6 +53,8 @@ export const UsersApi = {
   me: () => api.get<UserOut>('/api/v1/users/me'),
   list: (limit = 50, offset = 0) =>
     api.get<UserOut[]>(`/api/v1/users?limit=${limit}&offset=${offset}`),
+  update: (userId: string, body: UserUpdateIn) =>
+    api.patch<UserOut>(`/api/v1/users/${userId}`, body),
   delete: (userId: string) => api.delete<void>(`/api/v1/users/${userId}`),
   enqueueEmail: (body: EnqueueEmailIn) =>
     api.post<EnqueueEmailOut>('/api/v1/users/enqueue-email', body),
@@ -94,4 +98,8 @@ export const TwoFactorApi = {
 
   passkeyPasswordlessVerify: (payload: PasskeyLoginIn) =>
     api.post<OkOut>('/api/v1/auth/2fa/passkey/passwordless/verify', payload),
+}
+
+export const PermissionsApi = {
+  myPolicy: () => api.get<PolicyOut>('/api/v1/permissions/me'),
 }

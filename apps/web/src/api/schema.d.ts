@@ -194,7 +194,7 @@ export interface paths {
         put?: never;
         /**
          * Verify Email Otp
-         * @description Valida o código OTP de 6 dígitos enviado por e-mail e inicia sessão (ou desafio 2FA).
+         * @description Valida o código OTP de 6 dígitos enviado por e-mail e inicia sessão (sem 2FA).
          */
         post: operations["verify_email_otp_api_v1_auth_otp_email_verify_post"];
         delete?: never;
@@ -511,7 +511,8 @@ export interface paths {
         delete: operations["delete_user_api_v1_users__user_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /** Update User */
+        patch: operations["update_user_api_v1_users__user_id__patch"];
         trace?: never;
     };
     "/api/v1/users/enqueue-email": {
@@ -534,10 +535,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/permissions/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My Policy */
+        get: operations["my_policy_api_v1_permissions_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * Action
+         * @enum {string}
+         */
+        Action: "create" | "read" | "list" | "update" | "delete";
+        /** ActorOut */
+        ActorOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            role: components["schemas"]["Role"];
+        };
+        /** AllOf */
+        AllOf: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "all";
+            /** Conds */
+            conds: (components["schemas"]["Always"] | components["schemas"]["Eq"] | components["schemas"]["Not"] | components["schemas"]["AllOf"] | components["schemas"]["AnyOf"])[];
+        };
+        /** Always */
+        Always: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "always";
+        };
+        /** AnyOf */
+        AnyOf: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "any";
+            /** Conds */
+            conds: (components["schemas"]["Always"] | components["schemas"]["Eq"] | components["schemas"]["Not"] | components["schemas"]["AllOf"] | components["schemas"]["AnyOf"])[];
+        };
         /** EmailOtpRequestIn */
         EmailOtpRequestIn: {
             /**
@@ -575,6 +635,18 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** Eq */
+        Eq: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "eq";
+            /** Left */
+            left: components["schemas"]["Ref"] | components["schemas"]["Lit"];
+            /** Right */
+            right: components["schemas"]["Ref"] | components["schemas"]["Lit"];
+        };
         /** ForgotPasswordIn */
         ForgotPasswordIn: {
             /**
@@ -597,6 +669,16 @@ export interface components {
             status: "ok" | "degraded";
             /** Db */
             db: boolean;
+        };
+        /** Lit */
+        Lit: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "lit";
+            /** Value */
+            value: string | number | boolean | null;
         };
         /** LivenessOut */
         LivenessOut: {
@@ -635,6 +717,16 @@ export interface components {
              */
             methods: string[];
             user?: components["schemas"]["UserOut"] | null;
+        };
+        /** Not */
+        Not: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "not";
+            /** Cond */
+            cond: components["schemas"]["Always"] | components["schemas"]["Eq"] | components["schemas"]["Not"] | components["schemas"]["AllOf"] | components["schemas"]["AnyOf"];
         };
         /** OkOut */
         OkOut: {
@@ -822,6 +914,27 @@ export interface components {
             /** Pending Token */
             pending_token: string;
         };
+        /** PolicyOut */
+        PolicyOut: {
+            actor: components["schemas"]["ActorOut"];
+            /** Rules */
+            rules: components["schemas"]["RuleOut"][];
+        };
+        /** Ref */
+        Ref: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "ref";
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "actor" | "resource" | "env";
+            /** Attr */
+            attr: string;
+        };
         /** RegisterIn */
         RegisterIn: {
             /**
@@ -840,6 +953,25 @@ export interface components {
             token: string;
             /** New Password */
             new_password: string;
+        };
+        /**
+         * Resource
+         * @enum {string}
+         */
+        Resource: "user" | "email";
+        /**
+         * Role
+         * @enum {string}
+         */
+        Role: "admin" | "member";
+        /** RuleOut */
+        RuleOut: {
+            resource: components["schemas"]["Resource"];
+            action: components["schemas"]["Action"];
+            /** Fields */
+            fields: string[] | null;
+            /** When */
+            when: components["schemas"]["Always"] | components["schemas"]["Eq"] | components["schemas"]["Not"] | components["schemas"]["AllOf"] | components["schemas"]["AnyOf"];
         };
         /** TotpConfirmIn */
         TotpConfirmIn: {
@@ -896,6 +1028,18 @@ export interface components {
             is_active: boolean;
             /** Is Superuser */
             is_superuser: boolean;
+        };
+        /**
+         * UserUpdateIn
+         * @description PATCH parcial: só os campos enviados mudam (e só os que a política libera).
+         */
+        UserUpdateIn: {
+            /** Full Name */
+            full_name?: string | null;
+            /** Is Active */
+            is_active?: boolean | null;
+            /** Is Superuser */
+            is_superuser?: boolean | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -1654,6 +1798,41 @@ export interface operations {
             };
         };
     };
+    update_user_api_v1_users__user_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     enqueue_email_api_v1_users_enqueue_email_post: {
         parameters: {
             query?: never;
@@ -1683,6 +1862,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_policy_api_v1_permissions_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyOut"];
                 };
             };
         };

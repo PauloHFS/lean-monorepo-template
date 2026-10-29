@@ -6,10 +6,12 @@ import type { EnqueueEmailOut, HealthResponse, PasskeyRegisterIn, UserOut } from
 import { useAuth } from '../lib/auth'
 import { bytesToBase64Url } from '../lib/base64'
 import { humanizeError } from '../lib/errors'
+import { Can, usePermissions } from '../lib/permissions'
 import { toRegistrationOptions } from '../lib/webauthn'
 
 export function Dashboard() {
   const { user, logout } = useAuth()
+  const { can, canClass } = usePermissions()
   const navigate = useNavigate()
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [healthError, setHealthError] = useState(false)
@@ -56,7 +58,7 @@ export function Dashboard() {
   }, [])
 
   const loadUsers = useCallback(async () => {
-    if (!user?.is_superuser) return
+    if (!canClass('list', 'user')) return
     setUsersError(null)
     try {
       const list = await UsersApi.list()
@@ -65,7 +67,7 @@ export function Dashboard() {
       // Silencioso no mount: specs E2E mockados que não interceptam GET /users
       // continuam testando apenas o card de job sem ruído de alerta.
     }
-  }, [user?.is_superuser])
+  }, [canClass])
 
   useEffect(() => {
     void loadUsers()
@@ -219,7 +221,7 @@ export function Dashboard() {
         )}
       </section>
 
-      {user.is_superuser && (
+      <Can action="create" resource="email">
         <section className="card space-y-3">
           <h2 className="text-base font-semibold">Disparar job no Postgres</h2>
           <p className="text-sm text-slate-500">
@@ -245,9 +247,9 @@ export function Dashboard() {
             </p>
           )}
         </section>
-      )}
+      </Can>
 
-      {user.is_superuser && usersList.length > 0 && (
+      {canClass('list', 'user') && usersList.length > 0 && (
         <section className="card space-y-3">
           <header className="flex items-center justify-between gap-2">
             <h2 className="text-base font-semibold">Usuários cadastrados</h2>
@@ -270,7 +272,7 @@ export function Dashboard() {
                   </p>
                   {u.full_name && <p className="text-xs text-slate-500">{u.full_name}</p>}
                 </div>
-                {u.id !== user.id && (
+                {can('delete', 'user', { id: u.id }) && u.id !== user.id && (
                   <button
                     type="button"
                     onClick={() => void handleDeleteUser(u.id, u.email)}

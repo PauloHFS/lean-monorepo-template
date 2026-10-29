@@ -39,3 +39,8 @@ export type PasskeyLoginIn = components['schemas']['PasskeyLoginIn']
 export type PasskeyRegistrationCredential = components['schemas']['PasskeyRegistrationCredential']
 export type PasskeyAuthenticationCredential =
   components['schemas']['PasskeyAuthenticationCredential']
+
+export type PolicyOut = components['schemas']['PolicyOut']
+export type RuleOut = components['schemas']['RuleOut']
+export type ActorOut = components['schemas']['ActorOut']
+export type UserUpdateIn = components['schemas']['UserUpdateIn']

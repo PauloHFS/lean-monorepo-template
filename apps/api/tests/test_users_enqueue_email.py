@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -10,6 +9,7 @@ import pytest
 
 from app.api.v1.endpoints.users import EnqueueEmailIn, enqueue_email
 from app.jobs.tasks.email import send_email
+from app.permissions import Actor, Role
 
 
 async def test_enqueue_email_returns_job_id(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -22,9 +22,9 @@ async def test_enqueue_email_returns_job_id(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr("app.jobs.app.check_job_rate_limit", _no_rate_limit)
     monkeypatch.setattr(send_email, "defer_async", _defer)
     payload = EnqueueEmailIn(to="a@b.com", subject="hi", body="hello")
-    user = SimpleNamespace(id=uuid4())
+    actor = Actor(id=uuid4(), role=Role.ADMIN)
 
-    out = await enqueue_email(payload, user=user)  # type: ignore[arg-type]
+    out = await enqueue_email(payload, actor=actor)
 
     assert out.job_id == 42
     assert out.status == "queued"
