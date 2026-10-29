@@ -104,12 +104,16 @@ ENV_FILE="${ENV_FILE:-.env}"
 # ./scripts/backup.sh precisa vencer o `POSTGRES_CONTAINER=` do .env).
 _shell_container="${POSTGRES_CONTAINER:-}"
 _shell_compose_file="${BACKUP_COMPOSE_FILE:-}"
+_shell_backup_dir="${BACKUP_DIR:-}"
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   set -a; . "$ENV_FILE"; set +a
 fi
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-$_shell_container}"
 BACKUP_COMPOSE_FILE="${BACKUP_COMPOSE_FILE:-$_shell_compose_file}"
+if [[ -n "$_shell_backup_dir" ]]; then
+  BACKUP_DIR="$_shell_backup_dir"
+fi
 
 # POSTGRES_CONTAINER vazio = modo host (pg_dump local, como sempre).
 # Com valor = modo container: o dump sai de dentro do container do Postgres
@@ -120,9 +124,19 @@ fi
 : "${POSTGRES_DB:?POSTGRES_DB não definido}"
 : "${POSTGRES_USER:?POSTGRES_USER não definido}"
 if [[ -z "${BACKUP_COMPOSE_FILE:-}" ]]; then
-  BACKUP_COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.yml"
+  _repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  if [[ -f "${_repo_root}/docker-compose.yml" ]]; then
+    BACKUP_COMPOSE_FILE="${_repo_root}/docker-compose.yml"
+  elif [[ -f "${_repo_root}/docker-compose.yaml" ]]; then
+    BACKUP_COMPOSE_FILE="${_repo_root}/docker-compose.yaml"
+  else
+    BACKUP_COMPOSE_FILE="${_repo_root}/docker-compose.yml"
+  fi
 fi
 if [[ -n "$POSTGRES_CONTAINER" ]]; then
+  if [[ -z "${COMPOSE_PROJECT_NAME:-}" && -n "${COOLIFY_RESOURCE_UUID:-}" ]]; then
+    export COMPOSE_PROJECT_NAME="$COOLIFY_RESOURCE_UUID"
+  fi
   if ! command -v docker >/dev/null 2>&1; then
     echo "[backup] ERRO: POSTGRES_CONTAINER=$POSTGRES_CONTAINER, mas docker não está no PATH" >&2
     exit 1

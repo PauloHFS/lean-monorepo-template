@@ -148,9 +148,19 @@ BACKUP_COMPOSE_FILE="${BACKUP_COMPOSE_FILE:-$_shell_compose_file}"
 # Com valor = modo container: o dump do host é streamed para o pg_restore do
 # container via stdin (docker compose exec).
 if [[ -z "${BACKUP_COMPOSE_FILE:-}" ]]; then
-  BACKUP_COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.yml"
+  _repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  if [[ -f "${_repo_root}/docker-compose.yml" ]]; then
+    BACKUP_COMPOSE_FILE="${_repo_root}/docker-compose.yml"
+  elif [[ -f "${_repo_root}/docker-compose.yaml" ]]; then
+    BACKUP_COMPOSE_FILE="${_repo_root}/docker-compose.yaml"
+  else
+    BACKUP_COMPOSE_FILE="${_repo_root}/docker-compose.yml"
+  fi
 fi
 if [[ -n "$POSTGRES_CONTAINER" ]]; then
+  if [[ -z "${COMPOSE_PROJECT_NAME:-}" && -n "${COOLIFY_RESOURCE_UUID:-}" ]]; then
+    export COMPOSE_PROJECT_NAME="$COOLIFY_RESOURCE_UUID"
+  fi
   if ! command -v docker >/dev/null 2>&1; then
     echo "[restore] ERRO: POSTGRES_CONTAINER=$POSTGRES_CONTAINER, mas docker não está no PATH" >&2
     exit 1

@@ -189,6 +189,7 @@ log "gerando backup local com scripts/backup.sh"
 # descriptografa). Zera a passphrase para não herdar BACKUP_ENCRYPT_PASSPHRASE
 # do ambiente e gerar um .dump.enc que o glob abaixo não encontraria.
 ENV_FILE=/dev/null \
+  POSTGRES_CONTAINER="" \
   POSTGRES_HOST="$POSTGRES_HOST" \
   POSTGRES_PORT="$POSTGRES_PORT" \
   POSTGRES_USER="$POSTGRES_USER" \
@@ -208,6 +209,7 @@ DUMP_FILE="${dumps[0]}"
 
 log "restaurando $(basename "$DUMP_FILE") em $DST_DB"
 ENV_FILE=/dev/null \
+  POSTGRES_CONTAINER="" \
   POSTGRES_HOST="$POSTGRES_HOST" \
   POSTGRES_PORT="$POSTGRES_PORT" \
   POSTGRES_USER="$POSTGRES_USER" \
