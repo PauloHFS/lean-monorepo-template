@@ -118,7 +118,7 @@ if SPA_DIST.exists():
             return JSONResponse(status_code=404, content={"detail": "not found"})
         index = SPA_DIST / "index.html"
         if index.exists():
-            return FileResponse(index)
+            return FileResponse(index, headers={"Cache-Control": "no-cache"})
         return JSONResponse(
             status_code=503,
             content={"detail": "front não buildado. Rode `just web-build`"},
