@@ -30,6 +30,7 @@ Recovery codes são aceitos no lugar do TOTP (caso o usuário perca o app).
 - Logout = `DELETE FROM sessions WHERE token_hash = …` → revogação instantânea.
 - Endpoints em `/api/v1/auth/{register,login,logout,me}` e gestão de senha em `/api/v1/auth/password/{change,forgot,reset}` (com envio de link de recuperação via fila `email.send` e revogação de sessões ao redefinir/alterar senha).
 - `/auth/login` responde no mesmo tempo para e-mail inexistente e senha errada (verificação contra um hash dummy de custo equivalente) e emite log de auditoria com um fingerprint do e-mail — nunca o endereço cru.
+- **Autorização (ABAC):** toda regra de permissão vive em `apps/api/app/core/authz.py` (`Action` + `POLICIES` + `can/authorize/require/scope_for`). Endpoints nunca fazem `if user.is_superuser`; novas ações = novo `Action` + política + teste em `tests/test_authz.py`. Deny-by-default.
 - `GET /users` e `POST /users/enqueue-email` são **superuser-only** (403 para os demais). `DELETE /users/{id}` permite o próprio usuário (em `/security`) ou um superuser (no `/dashboard`).
 
 ---

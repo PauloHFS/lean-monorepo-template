@@ -1572,3 +1572,10 @@ tabela de log opt-in, com o ator vindo do contexto do request.
 
 - _(none open — all shipped infra is documented above; product-level decisions like
   2FA enforcement policy and OAuth/SSO live in the project README roadmap)_
+## AD-031 · Autorização ABAC centralizada (`app/core/authz.py`)
+
+**Contexto.** As regras estavam espalhadas (`require_superuser` em `users.py`, `if` inline no delete).
+
+**Decisão.** Modelo ABAC com uma única fonte de verdade: `Action` (enum), `POLICIES` (funções puras sobre atributos do usuário e do recurso), `can/authorize/require` e `scope_for`, que traduz a política em filtro SQL parametrizado para leituras em lote. Permissões ficam no código (estáticas, revisáveis em PR); deny-by-default; usuário inativo nega tudo.
+
+**Fora de escopo (por ora).** ReBAC (hierarquias) e permissões editáveis em banco/UI.

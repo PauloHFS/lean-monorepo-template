@@ -12,18 +12,13 @@ from sqlalchemy import CursorResult, text
 
 from app.api.deps import DB, CurrentUser
 from app.api.schemas import UserOut
+from app.core.authz import Action, Resource, authorize, require, scope_for
 from app.core.observability import inject_trace_context
 from app.core.ratelimit import rate_limit
 from app.jobs.app import defer_job
 from app.jobs.tasks.email import send_email
 
 router = APIRouter()
-
-
-def require_superuser(user: CurrentUser) -> None:
-    """Mesma regra do delete: listar todos os usuários / enviar e-mail é só admin."""
-    if not user.is_superuser:
-        raise HTTPException(status_code=403, detail="forbidden")
 
 
 class EnqueueEmailIn(BaseModel):
@@ -37,25 +32,28 @@ class EnqueueEmailOut(BaseModel):
     status: str
 
 
-@router.get("", response_model=list[UserOut], dependencies=[Depends(require_superuser)])
+@router.get("", response_model=list[UserOut], dependencies=[Depends(require(Action.USERS_LIST))])
 async def list_users(
+    user: CurrentUser,
     session: DB,
     # Teto de 100 evita varredura/payload descontrolado num endpoint autenticado.
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> list[UserOut]:
+    where, scope_params = scope_for(user)
     rows = (
         (
             await session.execute(
                 text(
-                    """
+                    f"""
                 SELECT id, email, full_name, is_active, is_superuser
                   FROM users
+                 WHERE {where}
                  ORDER BY created_at DESC
                  LIMIT :lim OFFSET :off
                 """
                 ),
-                {"lim": limit, "off": offset},
+                {"lim": limit, "off": offset, **scope_params},
             )
         )
         .mappings()
@@ -71,8 +69,7 @@ async def get_me(user: CurrentUser) -> UserOut:
 
 @router.delete("/{user_id}", status_code=204, response_model=None)
 async def delete_user(user_id: UUID, user: CurrentUser, session: DB) -> None:
-    if user.id != user_id and not user.is_superuser:
-        raise HTTPException(status_code=403, detail="forbidden")
+    authorize(user, Action.USERS_DELETE, Resource(owner_id=user_id))
     res = cast(
         CursorResult[Any],
         await session.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id}),
@@ -87,7 +84,7 @@ async def delete_user(user_id: UUID, user: CurrentUser, session: DB) -> None:
     response_model=EnqueueEmailOut,
     status_code=202,
     dependencies=[
-        Depends(require_superuser),
+        Depends(require(Action.USERS_ENQUEUE_EMAIL)),
         Depends(rate_limit("users.enqueue_email", limit=5, window_s=60)),
     ],
 )

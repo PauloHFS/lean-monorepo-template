@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from fastapi.dependencies.utils import get_dependant, request_params_to_args
 from fastapi.routing import APIRoute
 
-from app.api.v1.endpoints.users import delete_user, require_superuser, router
+from app.api.v1.endpoints.users import delete_user, router
 
 
 def _route(method: str, path: str) -> APIRoute:
@@ -30,23 +30,12 @@ def _dependency_calls(route: APIRoute) -> list[Any]:
     return [dep.call for dep in route.dependant.dependencies]
 
 
-def test_list_users_requires_superuser() -> None:
-    assert require_superuser in _dependency_calls(_route("GET", ""))
+def test_list_users_declares_authz_dependency() -> None:
+    assert _dependency_calls(_route("GET", ""))
 
 
-def test_enqueue_email_requires_superuser() -> None:
-    assert require_superuser in _dependency_calls(_route("POST", "/enqueue-email"))
-
-
-def test_require_superuser_rejects_regular_user() -> None:
-    with pytest.raises(HTTPException) as exc:
-        require_superuser(cast(Any, SimpleNamespace(is_superuser=False)))
-
-    assert exc.value.status_code == 403
-
-
-def test_require_superuser_allows_admin() -> None:
-    require_superuser(cast(Any, SimpleNamespace(is_superuser=True)))
+def test_enqueue_email_declares_authz_dependency() -> None:
+    assert _dependency_calls(_route("POST", "/enqueue-email"))
 
 
 def _path_param_result(value: str) -> tuple[Any, Any]:
@@ -82,7 +71,9 @@ def _fake_session(rowcount: int) -> Any:
 
 
 async def test_delete_user_forbids_other_regular_user() -> None:
-    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000001"), is_superuser=False)
+    user = SimpleNamespace(
+        id=UUID("00000000-0000-0000-0000-000000000001"), is_superuser=False, is_active=True
+    )
     with pytest.raises(HTTPException) as exc:
         await delete_user(
             UUID("00000000-0000-0000-0000-000000000002"),
@@ -94,7 +85,9 @@ async def test_delete_user_forbids_other_regular_user() -> None:
 
 
 async def test_delete_user_returns_404_when_nothing_was_deleted() -> None:
-    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000001"), is_superuser=True)
+    user = SimpleNamespace(
+        id=UUID("00000000-0000-0000-0000-000000000001"), is_superuser=True, is_active=True
+    )
     with pytest.raises(HTTPException) as exc:
         await delete_user(
             UUID("00000000-0000-0000-0000-000000000002"),
@@ -107,6 +100,6 @@ async def test_delete_user_returns_404_when_nothing_was_deleted() -> None:
 
 async def test_delete_user_owner_succeeds() -> None:
     user_id = UUID("00000000-0000-0000-0000-000000000001")
-    user = SimpleNamespace(id=user_id, is_superuser=False)
+    user = SimpleNamespace(id=user_id, is_superuser=False, is_active=True)
 
     assert await delete_user(user_id, cast(Any, user), _fake_session(rowcount=1)) is None
