@@ -85,7 +85,7 @@ export function Login() {
   const from = destinationOf(location.state)
   const { user, setUser } = useAuth()
   const [step, setStep] = useState<'credentials' | 'email-otp' | 'verify'>('credentials')
-  const [mode, setMode] = useState<Mode>('password')
+  const [mode, setMode] = useState<Mode>('code')
   const [pending, setPending] = useState<Pending2fa | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [passkeyBusy, setPasskeyBusy] = useState(false)

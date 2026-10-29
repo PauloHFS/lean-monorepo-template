@@ -28,6 +28,7 @@ test('registrar → login → usuário comum não vê a seção de job', async (
   // 2. Login pela UI
   await page.goto('/login')
   await page.getByLabel('E-mail').fill(email)
+  await page.getByRole('button', { name: /entrar com senha/i }).click()
   await page.getByLabel('Senha').fill(password)
   await page.getByRole('button', { name: /^entrar$/i }).click()
 
@@ -48,6 +49,7 @@ test('admin (superuser) → enfileirar job aparece no Dashboard', async ({ page,
   // Admin determinístico semeado pelo `just e2e-full`.
   await page.goto('/login')
   await page.getByLabel('E-mail').fill(ADMIN_EMAIL)
+  await page.getByRole('button', { name: /entrar com senha/i }).click()
   await page.getByLabel('Senha').fill(ADMIN_PASSWORD)
   await page.getByRole('button', { name: /^entrar$/i }).click()
 

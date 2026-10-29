@@ -14,6 +14,7 @@ test.beforeEach(async ({ page }) => {
 async function submitCredentials(page: Page): Promise<void> {
   await page.goto('/login')
   await page.getByLabel('E-mail').fill('user@example.com')
+  await page.getByRole('button', { name: /entrar com senha/i }).click()
   await page.getByLabel('Senha').fill('supersecret123')
   await page.getByRole('button', { name: /^entrar$/i }).click()
 }
@@ -123,6 +124,7 @@ test('guard preserva o destino e o login retorna para ele', async ({ page }) => 
   await expect(page).toHaveURL(/\/login$/)
 
   await page.getByLabel('E-mail').fill('user@example.com')
+  await page.getByRole('button', { name: /entrar com senha/i }).click()
   await page.getByLabel('Senha').fill('supersecret123')
   await page.getByRole('button', { name: /^entrar$/i }).click()
 
