@@ -61,6 +61,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if settings.is_prod:
             for k, v in _PROD_HEADERS.items():
                 response.headers.setdefault(k, v)
+        if request.url.path.startswith("/assets/") and response.status_code == 200:
+            response.headers.setdefault(
+                "Cache-Control",
+                "public, max-age=31536000, immutable",
+            )
         return response
 
 
