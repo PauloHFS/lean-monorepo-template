@@ -26,17 +26,26 @@ body,
  * :focus-visible; o outline padrão é removido só depois que o ring aparece.
  */
 @utility btn {
-  @apply inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60;
+  @apply inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60;
 }
 @utility btn-primary {
-  @apply btn bg-brand-600 text-white hover:bg-brand-700 focus-visible:ring-brand-500;
+  @apply btn bg-slate-900 text-white shadow-xs hover:bg-slate-800 focus-visible:ring-slate-900;
 }
 @utility btn-ghost {
-  @apply btn bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 focus-visible:ring-brand-500;
+  @apply btn bg-white text-slate-700 shadow-2xs ring-1 ring-slate-200/90 hover:bg-slate-50 focus-visible:ring-slate-400;
 }
 @utility input {
-  @apply min-h-12 w-full rounded-md border border-slate-500 bg-white px-3 py-2 text-sm shadow-xs placeholder:text-slate-500 focus:border-brand-500 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-500;
+  @apply min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 shadow-2xs transition placeholder:text-slate-400 focus:border-slate-900 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-slate-900/15;
 }
 @utility card {
-  @apply rounded-xl border border-slate-200 bg-white p-6 shadow-xs;
+  @apply rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm;
+}
+@utility auth-card {
+  @apply w-full max-w-[400px] overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-lg shadow-slate-900/5;
+}
+@utility auth-card-body {
+  @apply space-y-5 p-6 sm:p-8;
+}
+@utility auth-card-footer {
+  @apply border-t border-slate-200/80 bg-slate-50/80 px-6 py-4 text-center text-sm text-slate-500;
 }
