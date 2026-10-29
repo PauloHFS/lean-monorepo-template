@@ -32,7 +32,8 @@ test('página de cadastro (/register) e recuperação (/forgot-password) carrega
   await page.goto('/register')
   await expect(page.getByRole('heading', { name: /criar conta/i })).toBeVisible()
   await expect(page.getByLabel('E-mail')).toBeVisible()
-  await expect(page.getByLabel('Senha')).toBeVisible()
+  await expect(page.getByLabel('Senha', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('Confirmar senha')).toBeVisible()
 
   await page.goto('/forgot-password')
   await expect(page.getByRole('heading', { name: /recuperar senha/i })).toBeVisible()

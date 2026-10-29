@@ -9,11 +9,17 @@ import { AuthApi } from '../api/endpoints'
 import { useAuth } from '../lib/auth'
 import { humanizeError } from '../lib/errors'
 
-const registerSchema = z.object({
-  full_name: z.string().trim().max(200, 'máximo de 200 caracteres').optional(),
-  email: z.string().email('e-mail inválido'),
-  password: z.string().min(8, 'mínimo de 8 caracteres').max(72, 'máximo de 72 caracteres'),
-})
+const registerSchema = z
+  .object({
+    full_name: z.string().trim().max(200, 'máximo de 200 caracteres').optional(),
+    email: z.string().email('e-mail inválido'),
+    password: z.string().min(8, 'mínimo de 8 caracteres').max(72, 'máximo de 72 caracteres'),
+    confirm_password: z.string().min(1, 'confirme sua senha'),
+  })
+  .refine((data) => data.password === data.confirm_password, {
+    message: 'as senhas não coincidem',
+    path: ['confirm_password'],
+  })
 type RegisterData = z.infer<typeof registerSchema>
 
 export function Register() {
@@ -23,7 +29,7 @@ export function Register() {
 
   const form = useForm<RegisterData>({
     resolver: zodResolver(registerSchema),
-    defaultValues: { full_name: '', email: '', password: '' },
+    defaultValues: { full_name: '', email: '', password: '', confirm_password: '' },
   })
 
   if (user) return <Navigate to="/dashboard" replace />
@@ -58,6 +64,7 @@ export function Register() {
   const nameError = form.formState.errors.full_name
   const emailError = form.formState.errors.email
   const passwordError = form.formState.errors.password
+  const confirmPasswordError = form.formState.errors.confirm_password
 
   return (
     <main className="grid min-h-full place-items-center p-4 sm:p-6">
@@ -130,6 +137,30 @@ export function Register() {
           {passwordError && (
             <span id="register-password-error" role="alert" className="block text-xs text-red-600">
               {passwordError.message}
+            </span>
+          )}
+        </div>
+
+        <div className="space-y-1">
+          <label htmlFor="register-confirm-password" className="block text-sm text-slate-700">
+            Confirmar senha
+          </label>
+          <input
+            id="register-confirm-password"
+            type="password"
+            autoComplete="new-password"
+            aria-invalid={Boolean(confirmPasswordError)}
+            aria-describedby={confirmPasswordError ? 'register-confirm-password-error' : undefined}
+            {...form.register('confirm_password')}
+            className="input"
+          />
+          {confirmPasswordError && (
+            <span
+              id="register-confirm-password-error"
+              role="alert"
+              className="block text-xs text-red-600"
+            >
+              {confirmPasswordError.message}
             </span>
           )}
         </div>

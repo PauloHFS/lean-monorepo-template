@@ -44,6 +44,7 @@ export function Security() {
   // Troca de senha
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
+  const [confirmNewPassword, setConfirmNewPassword] = useState('')
   const [pwdBusy, setPwdBusy] = useState(false)
   const [pwdError, setPwdError] = useState<string | null>(null)
   const [pwdSuccess, setPwdSuccess] = useState<string | null>(null)
@@ -226,6 +227,10 @@ export function Security() {
     if (pwdBusy) return
     setPwdError(null)
     setPwdSuccess(null)
+    if (newPassword !== confirmNewPassword) {
+      setPwdError('A confirmação de senha não coincide com a nova senha.')
+      return
+    }
     setPwdBusy(true)
     try {
       await AuthApi.changePassword({
@@ -234,6 +239,7 @@ export function Security() {
       })
       setCurrentPassword('')
       setNewPassword('')
+      setConfirmNewPassword('')
       setPwdSuccess('Senha alterada com sucesso.')
     } catch (err) {
       setPwdError(humanizeError(err, 'Senha atual incorreta.'))
@@ -560,6 +566,22 @@ export function Security() {
               required
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
+              className="input"
+            />
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="sec-confirm-new-password" className="block text-sm text-slate-700">
+              Confirmar nova senha
+            </label>
+            <input
+              id="sec-confirm-new-password"
+              type="password"
+              autoComplete="new-password"
+              minLength={8}
+              maxLength={72}
+              required
+              value={confirmNewPassword}
+              onChange={(e) => setConfirmNewPassword(e.target.value)}
               className="input"
             />
           </div>

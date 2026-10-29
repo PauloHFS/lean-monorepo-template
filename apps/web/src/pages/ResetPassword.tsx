@@ -8,10 +8,16 @@ import { ApiError } from '../api/client'
 import { AuthApi } from '../api/endpoints'
 import { humanizeError } from '../lib/errors'
 
-const resetSchema = z.object({
-  token: z.string().trim().min(16, 'token inválido'),
-  new_password: z.string().min(8, 'mínimo de 8 caracteres').max(72, 'máximo de 72 caracteres'),
-})
+const resetSchema = z
+  .object({
+    token: z.string().trim().min(16, 'token inválido'),
+    new_password: z.string().min(8, 'mínimo de 8 caracteres').max(72, 'máximo de 72 caracteres'),
+    confirm_password: z.string().min(1, 'confirme a nova senha'),
+  })
+  .refine((data) => data.new_password === data.confirm_password, {
+    message: 'as senhas não coincidem',
+    path: ['confirm_password'],
+  })
 type ResetData = z.infer<typeof resetSchema>
 
 export function ResetPassword() {
@@ -22,13 +28,16 @@ export function ResetPassword() {
 
   const form = useForm<ResetData>({
     resolver: zodResolver(resetSchema),
-    defaultValues: { token: initialToken, new_password: '' },
+    defaultValues: { token: initialToken, new_password: '', confirm_password: '' },
   })
 
   async function onSubmit(values: ResetData) {
     setSubmitError(null)
     try {
-      await AuthApi.resetPassword(values)
+      await AuthApi.resetPassword({
+        token: values.token,
+        new_password: values.new_password,
+      })
       setDone(true)
     } catch (err) {
       if (err instanceof ApiError && err.status === 400) {
@@ -41,6 +50,7 @@ export function ResetPassword() {
 
   const tokenError = form.formState.errors.token
   const passwordError = form.formState.errors.new_password
+  const confirmPasswordError = form.formState.errors.confirm_password
 
   return (
     <main className="grid min-h-full place-items-center p-4 sm:p-6">
@@ -104,6 +114,30 @@ export function ResetPassword() {
               {passwordError && (
                 <span id="reset-password-error" role="alert" className="block text-xs text-red-600">
                   {passwordError.message}
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="reset-confirm-password" className="block text-sm text-slate-700">
+                Confirmar nova senha
+              </label>
+              <input
+                id="reset-confirm-password"
+                type="password"
+                autoComplete="new-password"
+                aria-invalid={Boolean(confirmPasswordError)}
+                aria-describedby={confirmPasswordError ? 'reset-confirm-password-error' : undefined}
+                {...form.register('confirm_password')}
+                className="input"
+              />
+              {confirmPasswordError && (
+                <span
+                  id="reset-confirm-password-error"
+                  role="alert"
+                  className="block text-xs text-red-600"
+                >
+                  {confirmPasswordError.message}
                 </span>
               )}
             </div>
