@@ -50,6 +50,70 @@ def _max_72_utf8_bytes(value: str) -> str:
     return value
 
 
+_COMMON_WEAK_PASSWORDS = frozenset(
+    {
+        "12345678",
+        "123456789",
+        "1234567890",
+        "87654321",
+        "password",
+        "password1",
+        "password123",
+        "qwerty123",
+        "qwertyuiop",
+        "11111111",
+        "00000000",
+        "iloveyou",
+        "admin123",
+        "welcome1",
+        "letmein1",
+        "monkey123",
+        "dragon123",
+        "sunshine1",
+        "princess1",
+        "football1",
+        "baseball1",
+        "abc12345",
+        "abc123456",
+        "senha123",
+        "senha1234",
+        "mudar123",
+        "mudar@123",
+        "brasil123",
+    }
+)
+
+
+def validate_nist_password(password: str, email: str | None = None) -> None:
+    """Valida regras NIST SP 800-63B / OWASP ASVS em criação/troca de senha.
+
+    Bloqueia:
+    - senhas na blocklist de vazamentos comuns;
+    - senhas formadas apenas por 1 único caractere repetido (ex.: 'aaaaaaaa');
+    - sequências numéricas triviais;
+    - senha igual ao endereço de e-mail ou à parte local do e-mail.
+    """
+    low = password.strip().lower()
+    if low in _COMMON_WEAK_PASSWORDS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Esta senha é muito comum e insegura. Escolha uma senha mais forte.",
+        )
+    if len(set(low)) <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A senha não pode conter apenas caracteres repetidos.",
+        )
+    if email:
+        email_norm = email.strip().lower()
+        local_part = email_norm.split("@", 1)[0]
+        if low == email_norm or (len(local_part) >= 4 and low == local_part):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="A senha não pode ser igual ao seu e-mail.",
+            )
+
+
 # min_length vem de settings (não hardcode) para não divergir de hash_password;
 # max_length=72 em caracteres é o teto do bcrypt, e o AfterValidator garante o
 # teto em BYTES (um caractere multibyte pode ocupar mais de um byte).
@@ -86,6 +150,15 @@ class ResetPasswordIn(BaseModel):
     new_password: Password
 
 
+class EmailOtpRequestIn(BaseModel):
+    email: EmailStr
+
+
+class EmailOtpVerifyIn(BaseModel):
+    email: EmailStr
+    code: str = Field(pattern=r"^\d{6}$")
+
+
 class LoginOut(BaseModel):
     """Resposta de login: ou UserOut (login OK) ou challenge de 2FA pendente."""
 
@@ -104,6 +177,7 @@ class LoginOut(BaseModel):
 )
 async def register(payload: RegisterIn, session: DB) -> UserOut:
     await enforce_account_limit("register", payload.email, limit=3, window_s=3600)
+    validate_nist_password(payload.password, payload.email)
     ph = hash_password(payload.password)
     try:
         row = (
@@ -278,6 +352,7 @@ async def change_password(
     if not verify_password(payload.current_password, user.password_hash):
         log.warning("auth.password.change", outcome="failure", user_id=str(user.id))
         raise HTTPException(status_code=401, detail="invalid current password")
+    validate_nist_password(payload.new_password, user.email)
     new_hash = hash_password(payload.new_password)
     await session.execute(
         text("UPDATE users SET password_hash = :ph WHERE id = :id"),
@@ -380,6 +455,11 @@ async def reset_password(payload: ResetPasswordIn, session: DB) -> OkOut:
     await cache.delete(key)
 
     user_id = raw_uid
+    raw_email = payload_dict.get("email")
+    validate_nist_password(
+        payload.new_password,
+        raw_email if isinstance(raw_email, str) else None,
+    )
     new_hash = hash_password(payload.new_password)
     await session.execute(
         text("UPDATE users SET password_hash = :ph WHERE id = :id"),
@@ -392,3 +472,200 @@ async def reset_password(payload: ResetPasswordIn, session: DB) -> OkOut:
     await session.commit()
     log.info("auth.password.reset", outcome="success", user_id=user_id)
     return OkOut(ok=True)
+
+
+_EMAIL_OTP_TTL_S = 600  # 10 minutos
+_EMAIL_OTP_MAX_ATTEMPTS = 5
+
+
+def _email_otp_cache_key(email: str) -> str:
+    norm = email.strip().lower()
+    digest = hashlib.sha256(norm.encode("utf-8")).hexdigest()
+    return f"email_otp:{digest}"
+
+
+@router.post(
+    "/otp/email/request",
+    response_model=OkOut,
+    dependencies=[Depends(rate_limit("auth.otp.email.request", limit=5, window_s=60))],
+)
+async def request_email_otp(payload: EmailOtpRequestIn, session: DB) -> OkOut:
+    """Envia um código de 6 dígitos de uso único (OTP) por e-mail para login sem senha."""
+    await enforce_account_limit("otp.email.request", payload.email, limit=5, window_s=900)
+    row = (
+        (
+            await session.execute(
+                text("SELECT id, email, is_active FROM users WHERE email = :e"),
+                {"e": payload.email},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    email_fp = _email_fingerprint(payload.email)
+    if not row or not row["is_active"]:
+        log.info("auth.otp.email.request", outcome="noop", email_fp=email_fp)
+        return OkOut(ok=True)
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
+    await cache.set(
+        _email_otp_cache_key(str(row["email"])),
+        {
+            "user_id": str(row["id"]),
+            "code_hash": code_hash,
+            "attempts": 0,
+        },
+        ttl_s=_EMAIL_OTP_TTL_S,
+    )
+
+    tracer = trace.get_tracer("lean.api")
+    with tracer.start_as_current_span("auth.otp.email.send"):
+        job_payload = inject_trace_context(
+            {
+                "to": str(row["email"]),
+                "subject": f"Seu código de acesso: {code} — {settings.app_name}",
+                "text": (
+                    f"Seu código de acesso único para entrar em {settings.app_name} é:\n\n"
+                    f"    {code}\n\n"
+                    "Este código expira em 10 minutos e vale para um único uso.\n"
+                    "Se você não solicitou este código, ignore este e-mail."
+                ),
+            }
+        )
+        await defer_job(
+            send_email,
+            rate_limit_kind="email.send",
+            rate_limit_key=f"email_otp:{row['id']}",
+            rate_limit_limit=6,
+            rate_limit_window_s=900,
+            **job_payload,
+        )
+    log.info(
+        "auth.otp.email.request",
+        outcome="queued",
+        email_fp=email_fp,
+        user_id=str(row["id"]),
+    )
+    return OkOut(ok=True)
+
+
+@router.post(
+    "/otp/email/verify",
+    response_model=LoginOut,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(rate_limit("auth.otp.email.verify", limit=10, window_s=60))],
+)
+async def verify_email_otp(
+    payload: EmailOtpVerifyIn, request: Request, response: Response, session: DB
+) -> LoginOut:
+    """Valida o código OTP de 6 dígitos enviado por e-mail e inicia sessão (ou desafio 2FA)."""
+    await enforce_account_limit("otp.email.verify", payload.email, limit=10, window_s=300)
+    email_fp = _email_fingerprint(payload.email)
+    key = _email_otp_cache_key(payload.email)
+    cached = await cache.get(key)
+    if not isinstance(cached, dict):
+        log.warning(
+            "auth.otp.email.verify", outcome="failure", reason="not_found", email_fp=email_fp
+        )
+        raise HTTPException(status_code=401, detail="invalid or expired code")
+
+    data = cast(dict[str, Any], cached)
+    expected_hash = str(data.get("code_hash", ""))
+    attempts = int(data.get("attempts", 0))
+    given_hash = hashlib.sha256(payload.code.strip().encode("utf-8")).hexdigest()
+
+    if not secrets.compare_digest(expected_hash, given_hash):
+        attempts += 1
+        if attempts >= _EMAIL_OTP_MAX_ATTEMPTS:
+            await cache.delete(key)
+        else:
+            data["attempts"] = attempts
+            await cache.set(key, data, ttl_s=_EMAIL_OTP_TTL_S)
+        log.warning(
+            "auth.otp.email.verify",
+            outcome="failure",
+            reason="mismatch",
+            attempts=attempts,
+            email_fp=email_fp,
+        )
+        raise HTTPException(status_code=401, detail="invalid or expired code")
+
+    await cache.delete(key)
+    user_id = str(data.get("user_id", ""))
+    row = (
+        (
+            await session.execute(
+                text(
+                    "SELECT id, email, full_name, is_superuser, is_active, totp_enabled "
+                    "FROM users WHERE id = :uid"
+                ),
+                {"uid": user_id},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if not row or not row["is_active"]:
+        raise HTTPException(status_code=403, detail="user inactive")
+
+    methods: list[str] = []
+    if row["totp_enabled"]:
+        methods.append("totp")
+    pk = await session.execute(
+        text("SELECT 1 FROM user_passkeys WHERE user_id = :uid LIMIT 1"),
+        {"uid": row["id"]},
+    )
+    if pk.scalar_one_or_none():
+        methods.append("passkey")
+
+    log.info(
+        "auth.otp.email.verify",
+        outcome="success",
+        email_fp=email_fp,
+        user_id=str(row["id"]),
+        requires_2fa=bool(methods),
+    )
+
+    if methods:
+        token = await totp_mod.store_pending(
+            str(row["id"]),
+            ip=request.client.host if request.client else None,
+            ua=request.headers.get("user-agent"),
+        )
+        return LoginOut(
+            requires_2fa=True,
+            pending_token=token,
+            methods=methods,
+            user=None,
+        )
+
+    token = generate_session_token()
+    await session.execute(
+        text(
+            """
+            INSERT INTO sessions (user_id, token_hash, user_agent, ip, expires_at)
+            VALUES (:uid, :th, :ua, :ip, :exp)
+            """
+        ),
+        {
+            "uid": row["id"],
+            "th": hash_session_token(token),
+            "ua": request.headers.get("user-agent"),
+            "ip": request.client.host if request.client else None,
+            "exp": session_expiry(),
+        },
+    )
+    await session.commit()
+
+    set_session_cookie(response, token)
+    return LoginOut(
+        requires_2fa=False,
+        user=UserOut(
+            id=row["id"],
+            email=row["email"],
+            full_name=row["full_name"],
+            is_active=row["is_active"],
+            is_superuser=row["is_superuser"],
+        ),
+    )

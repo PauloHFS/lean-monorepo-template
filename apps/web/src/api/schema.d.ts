@@ -163,6 +163,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/otp/email/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Email Otp
+         * @description Envia um código de 6 dígitos de uso único (OTP) por e-mail para login sem senha.
+         */
+        post: operations["request_email_otp_api_v1_auth_otp_email_request_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/otp/email/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Email Otp
+         * @description Valida o código OTP de 6 dígitos enviado por e-mail e inicia sessão (ou desafio 2FA).
+         */
+        post: operations["verify_email_otp_api_v1_auth_otp_email_verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/2fa/status": {
         parameters: {
             query?: never;
@@ -498,6 +538,24 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** EmailOtpRequestIn */
+        EmailOtpRequestIn: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+        };
+        /** EmailOtpVerifyIn */
+        EmailOtpVerifyIn: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /** Code */
+            code: string;
+        };
         /** EnqueueEmailIn */
         EnqueueEmailIn: {
             /**
@@ -1091,6 +1149,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_email_otp_api_v1_auth_otp_email_request_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailOtpRequestIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_email_otp_api_v1_auth_otp_email_verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailOtpVerifyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginOut"];
                 };
             };
             /** @description Validation Error */

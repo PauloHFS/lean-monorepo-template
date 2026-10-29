@@ -20,6 +20,9 @@ test('app carrega e o formulário de login aparece', async ({ page }) => {
   await expect(page.getByLabel('Senha')).toBeVisible()
   await expect(page.getByRole('button', { name: /^entrar$/i })).toBeVisible()
   await expect(page.getByRole('button', { name: /entrar com passkey/i })).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: /receber código de 6 dígitos por e-mail/i }),
+  ).toBeVisible()
   await expect(page.getByRole('link', { name: /criar conta/i })).toBeVisible()
   await expect(page.getByRole('link', { name: /esqueceu a senha/i })).toBeVisible()
 })

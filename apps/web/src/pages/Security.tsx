@@ -9,6 +9,7 @@ import type { PasskeyItemOut, PasskeyRegisterIn } from '../api/types'
 import { useAuth } from '../lib/auth'
 import { bytesToBase64Url } from '../lib/base64'
 import { humanizeError } from '../lib/errors'
+import { evaluatePasswordStrength, validateNistPasswordClient } from '../lib/password'
 import { toRegistrationOptions } from '../lib/webauthn'
 
 type Stage = 'idle' | 'scanning' | 'enabled'
@@ -227,6 +228,11 @@ export function Security() {
     if (pwdBusy) return
     setPwdError(null)
     setPwdSuccess(null)
+    const nistErr = validateNistPasswordClient(newPassword, user?.email)
+    if (nistErr) {
+      setPwdError(nistErr)
+      return
+    }
     if (newPassword !== confirmNewPassword) {
       setPwdError('A confirmação de senha não coincide com a nova senha.')
       return
@@ -568,6 +574,26 @@ export function Security() {
               onChange={(e) => setNewPassword(e.target.value)}
               className="input"
             />
+            {newPassword && (
+              <div className="space-y-1 pt-1" aria-live="polite">
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4].map((bar) => {
+                    const st = evaluatePasswordStrength(newPassword, user?.email)
+                    return (
+                      <div
+                        key={bar}
+                        className={`h-1.5 flex-1 rounded-full transition-colors ${
+                          st.score >= bar ? st.colorClass : 'bg-slate-200'
+                        }`}
+                      />
+                    )
+                  })}
+                </div>
+                <p className="text-xs text-slate-600">
+                  {evaluatePasswordStrength(newPassword, user?.email).label}
+                </p>
+              </div>
+            )}
           </div>
           <div className="space-y-1">
             <label htmlFor="sec-confirm-new-password" className="block text-sm text-slate-700">

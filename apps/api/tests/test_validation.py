@@ -7,9 +7,16 @@ from typing import Any
 
 import pytest
 from annotated_types import Ge, Le
+from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.api.v1.endpoints.auth import LoginIn, RegisterIn
+from app.api.v1.endpoints.auth import (
+    EmailOtpRequestIn,
+    EmailOtpVerifyIn,
+    LoginIn,
+    RegisterIn,
+    validate_nist_password,
+)
 from app.api.v1.endpoints.twofa import (
     PasskeyLoginIn,
     PasskeyRegisterIn,
@@ -62,6 +69,24 @@ def test_register_rejects_multibyte_password_above_72_bytes() -> None:
     # 40 caracteres, mas 80 bytes em UTF-8: o limite é em bytes, não chars.
     with pytest.raises(ValidationError):
         RegisterIn(email="a@b.com", password="é" * 40)
+
+
+def test_nist_password_rules_reject_common_and_repeated_and_email_match() -> None:
+    for weak in ("12345678", "password", "aaaaaaaa", "user@example.com"):
+        with pytest.raises(HTTPException) as exc:
+            validate_nist_password(weak, "user@example.com")
+        assert exc.value.status_code == 422
+
+    # Senha forte passa sem erro
+    validate_nist_password("c0rrect-h0rse-battery", "user@example.com")
+
+
+def test_email_otp_schemas_validation() -> None:
+    assert EmailOtpRequestIn(email="user@example.com")
+    assert EmailOtpVerifyIn(email="user@example.com", code="012345")
+    for bad in ("12345", "1234567", "abcdef"):
+        with pytest.raises(ValidationError):
+            EmailOtpVerifyIn(email="user@example.com", code=bad)
 
 
 # --- 2FA ----------------------------------------------------------------------

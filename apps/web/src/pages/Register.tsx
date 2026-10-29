@@ -8,6 +8,7 @@ import { ApiError } from '../api/client'
 import { AuthApi } from '../api/endpoints'
 import { useAuth } from '../lib/auth'
 import { humanizeError } from '../lib/errors'
+import { evaluatePasswordStrength, validateNistPasswordClient } from '../lib/password'
 
 const registerSchema = z
   .object({
@@ -16,9 +17,22 @@ const registerSchema = z
     password: z.string().min(8, 'mínimo de 8 caracteres').max(72, 'máximo de 72 caracteres'),
     confirm_password: z.string().min(1, 'confirme sua senha'),
   })
-  .refine((data) => data.password === data.confirm_password, {
-    message: 'as senhas não coincidem',
-    path: ['confirm_password'],
+  .superRefine((data, ctx) => {
+    const nistErr = validateNistPasswordClient(data.password, data.email)
+    if (nistErr) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: nistErr,
+        path: ['password'],
+      })
+    }
+    if (data.password !== data.confirm_password) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'as senhas não coincidem',
+        path: ['confirm_password'],
+      })
+    }
   })
 type RegisterData = z.infer<typeof registerSchema>
 
@@ -65,13 +79,18 @@ export function Register() {
   const emailError = form.formState.errors.email
   const passwordError = form.formState.errors.password
   const confirmPasswordError = form.formState.errors.confirm_password
+  const watchedPassword = form.watch('password')
+  const watchedEmail = form.watch('email')
+  const strength = evaluatePasswordStrength(watchedPassword, watchedEmail)
 
   return (
     <main className="grid min-h-full place-items-center p-4 sm:p-6">
       <form onSubmit={form.handleSubmit(onSubmit)} className="card w-full max-w-sm space-y-4">
         <header className="space-y-1">
           <h1 className="text-xl font-semibold">Criar conta</h1>
-          <p className="text-sm text-slate-500">Cadastre-se para acessar o sistema.</p>
+          <p className="text-sm text-slate-500">
+            Cadastre-se para acessar. Depois de entrar, você poderá ativar sua Passkey.
+          </p>
         </header>
 
         <div className="space-y-1">
@@ -132,8 +151,23 @@ export function Register() {
             className="input"
           />
           <p id="register-password-hint" className="text-xs text-slate-500">
-            Mínimo de 8 caracteres.
+            Mínimo de 8 caracteres (recomendado: 12+ caracteres ou frase-senha).
           </p>
+          {watchedPassword && (
+            <div className="space-y-1 pt-1" aria-live="polite">
+              <div className="flex gap-1">
+                {[1, 2, 3, 4].map((bar) => (
+                  <div
+                    key={bar}
+                    className={`h-1.5 flex-1 rounded-full transition-colors ${
+                      strength.score >= bar ? strength.colorClass : 'bg-slate-200'
+                    }`}
+                  />
+                ))}
+              </div>
+              <p className="text-xs text-slate-600">{strength.label}</p>
+            </div>
+          )}
           {passwordError && (
             <span id="register-password-error" role="alert" className="block text-xs text-red-600">
               {passwordError.message}

@@ -37,10 +37,15 @@ export function Login() {
   const location = useLocation()
   const from = destinationOf(location.state)
   const { user, setUser } = useAuth()
-  const [step, setStep] = useState<'credentials' | 'verify'>('credentials')
+  const [step, setStep] = useState<'credentials' | 'email-otp' | 'verify'>('credentials')
   const [pending, setPending] = useState<Pending2fa | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [passkeyBusy, setPasskeyBusy] = useState(false)
+
+  // Email OTP state
+  const [otpEmail, setOtpEmail] = useState('')
+  const [otpCode, setOtpCode] = useState('')
+  const [otpBusy, setOtpBusy] = useState(false)
 
   const credForm = useForm<CredData>({
     resolver: zodResolver(credSchema),
@@ -60,7 +65,6 @@ export function Login() {
         setStep('verify')
         return
       }
-      // Login sem 2FA — cookie setado. Atualiza contexto e vai.
       if (!response.user) {
         setSubmitError('Sessão inválida. Tente novamente.')
         return
@@ -72,12 +76,63 @@ export function Login() {
     }
   }
 
+  async function onSendEmailOtp() {
+    if (otpBusy || passkeyBusy) return
+    setSubmitError(null)
+    const emailVal = credForm.getValues('email').trim()
+    const parsed = z.string().email().safeParse(emailVal)
+    if (!parsed.success) {
+      credForm.setError('email', { message: 'informe seu e-mail para receber o código' })
+      return
+    }
+    credForm.clearErrors('email')
+    setOtpBusy(true)
+    try {
+      await AuthApi.requestEmailOtp({ email: parsed.data })
+      setOtpEmail(parsed.data)
+      setOtpCode('')
+      setStep('email-otp')
+    } catch (err) {
+      setSubmitError(humanizeError(err, 'Não foi possível enviar o código por e-mail.'))
+    } finally {
+      setOtpBusy(false)
+    }
+  }
+
+  async function onVerifyEmailOtp(e: React.FormEvent) {
+    e.preventDefault()
+    if (otpBusy || otpCode.trim().length !== 6) return
+    setSubmitError(null)
+    setOtpBusy(true)
+    try {
+      const response = await AuthApi.verifyEmailOtp({
+        email: otpEmail,
+        code: otpCode.trim(),
+      })
+      if (response.requires_2fa) {
+        setPending({ token: response.pending_token ?? '', methods: response.methods })
+        setStep('verify')
+        return
+      }
+      if (!response.user) {
+        setSubmitError('Sessão inválida. Tente novamente.')
+        return
+      }
+      setUser(response.user)
+      navigate(from, { replace: true })
+    } catch (err) {
+      setSubmitError(humanizeError(err, 'Código inválido ou expirado.'))
+      setOtpCode('')
+    } finally {
+      setOtpBusy(false)
+    }
+  }
+
   async function onSubmitCode(values: CodeData) {
     if (!pending) return
     setSubmitError(null)
     try {
       await TwoFactorApi.totpVerify(pending.token, values.code)
-      // Cookie foi setado pelo backend. Pega /me para popular o contexto.
       const me = await AuthApi.me()
       setUser(me)
       navigate(from, { replace: true })
@@ -188,7 +243,6 @@ export function Login() {
   }
 
   function onCancel2fa() {
-    // O pending token expira sozinho no servidor; aqui só voltamos ao início.
     setPending(null)
     setStep('credentials')
     setSubmitError(null)
@@ -197,6 +251,68 @@ export function Login() {
 
   // Já autenticado: não faz sentido mostrar o formulário de login.
   if (user) return <Navigate to={from} replace />
+
+  if (step === 'email-otp') {
+    return (
+      <main className="grid min-h-full place-items-center p-4 sm:p-6">
+        <form onSubmit={onVerifyEmailOtp} className="card w-full max-w-sm space-y-4">
+          <header className="space-y-1">
+            <h1 className="text-xl font-semibold">Código enviado por e-mail</h1>
+            <p className="text-sm text-slate-500">
+              Enviamos um código de 6 dígitos para{' '}
+              <span className="font-medium text-slate-800">{otpEmail}</span>.
+            </p>
+          </header>
+
+          <div className="space-y-1">
+            <label htmlFor="email-otp-code" className="block text-sm text-slate-700">
+              Código de 6 dígitos
+            </label>
+            <input
+              id="email-otp-code"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              autoComplete="one-time-code"
+              placeholder="000000"
+              required
+              value={otpCode}
+              onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+              className="input text-center font-mono text-lg tracking-widest"
+            />
+            <p className="text-xs text-slate-500">Válido por 10 minutos para um único acesso.</p>
+          </div>
+
+          {submitError && (
+            <p role="alert" className="text-sm text-red-600">
+              {submitError}
+            </p>
+          )}
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => {
+                setStep('credentials')
+                setSubmitError(null)
+              }}
+              className="btn-ghost flex-1"
+            >
+              Voltar
+            </button>
+            <button
+              type="submit"
+              disabled={otpBusy || otpCode.length !== 6}
+              className="btn-primary flex-1"
+            >
+              {otpBusy ? 'Verificando…' : 'Confirmar código'}
+            </button>
+          </div>
+        </form>
+      </main>
+    )
+  }
 
   if (step === 'verify' && pending) {
     const showPasskey = pending.methods.includes('passkey')
@@ -283,8 +399,25 @@ export function Login() {
       >
         <header className="space-y-1">
           <h1 className="text-xl font-semibold">Entrar</h1>
-          <p className="text-sm text-slate-500">Use sua conta para acessar.</p>
+          <p className="text-sm text-slate-500">
+            Use Passkey, código único por e-mail ou sua senha.
+          </p>
         </header>
+
+        <button
+          type="button"
+          onClick={() => void onPasswordlessPasskey()}
+          disabled={passkeyBusy || credForm.formState.isSubmitting || otpBusy}
+          className="btn-primary w-full"
+        >
+          {passkeyBusy ? 'Aguardando autenticador…' : 'Entrar com passkey'}
+        </button>
+
+        <div className="relative flex items-center py-1">
+          <div className="flex-grow border-t border-slate-200" />
+          <span className="mx-3 flex-shrink text-xs text-slate-400">ou com e-mail</span>
+          <div className="flex-grow border-t border-slate-200" />
+        </div>
 
         <div className="space-y-1">
           <label htmlFor="login-email" className="block text-sm text-slate-700">
@@ -306,7 +439,16 @@ export function Login() {
           )}
         </div>
 
-        <div className="space-y-1">
+        <button
+          type="button"
+          onClick={() => void onSendEmailOtp()}
+          disabled={otpBusy || passkeyBusy || credForm.formState.isSubmitting}
+          className="btn-ghost w-full"
+        >
+          {otpBusy ? 'Enviando código…' : 'Receber código de 6 dígitos por e-mail'}
+        </button>
+
+        <div className="space-y-1 pt-1">
           <div className="flex items-center justify-between">
             <label htmlFor="login-password" className="block text-sm text-slate-700">
               Senha
@@ -339,19 +481,10 @@ export function Login() {
 
         <button
           type="submit"
-          disabled={credForm.formState.isSubmitting || passkeyBusy}
-          className="btn-primary w-full"
-        >
-          {credForm.formState.isSubmitting ? 'Entrando…' : 'Entrar'}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => void onPasswordlessPasskey()}
-          disabled={passkeyBusy || credForm.formState.isSubmitting}
+          disabled={credForm.formState.isSubmitting || passkeyBusy || otpBusy}
           className="btn-ghost w-full"
         >
-          {passkeyBusy ? 'Aguardando autenticador…' : 'Entrar com passkey'}
+          {credForm.formState.isSubmitting ? 'Entrando…' : 'Entrar'}
         </button>
 
         <p className="text-center text-sm text-slate-600">

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 
-import { HealthApi, UsersApi } from '../api/endpoints'
-import type { EnqueueEmailOut, HealthResponse, UserOut } from '../api/types'
+import { HealthApi, TwoFactorApi, UsersApi } from '../api/endpoints'
+import type { EnqueueEmailOut, HealthResponse, PasskeyRegisterIn, UserOut } from '../api/types'
 import { useAuth } from '../lib/auth'
+import { bytesToBase64Url } from '../lib/base64'
 import { humanizeError } from '../lib/errors'
+import { toRegistrationOptions } from '../lib/webauthn'
 
 export function Dashboard() {
   const { user, logout } = useAuth()
@@ -18,6 +20,26 @@ export function Dashboard() {
   const [usersList, setUsersList] = useState<UserOut[]>([])
   const [usersBusy, setUsersBusy] = useState(false)
   const [usersError, setUsersError] = useState<string | null>(null)
+
+  const [showPasskeyPrompt, setShowPasskeyPrompt] = useState(false)
+  const [passkeyPromptBusy, setPasskeyPromptBusy] = useState(false)
+  const [passkeyPromptMsg, setPasskeyPromptMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    TwoFactorApi.status()
+      .then((st) => {
+        if (alive && st.passkeys.length === 0) {
+          setShowPasskeyPrompt(true)
+        }
+      })
+      .catch(() => {
+        // Silencioso para testes E2E mockados que não interceptam /status
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -85,6 +107,44 @@ export function Dashboard() {
     }
   }
 
+  async function handleQuickRegisterPasskey() {
+    if (passkeyPromptBusy) return
+    setPasskeyPromptBusy(true)
+    setPasskeyPromptMsg(null)
+    try {
+      const { options, challenge } = await TwoFactorApi.passkeyRegisterOptions()
+      const credential = await navigator.credentials.create({
+        publicKey: toRegistrationOptions(options),
+      })
+      if (!(credential instanceof PublicKeyCredential)) return
+      const resp = credential.response
+      if (!(resp instanceof AuthenticatorAttestationResponse)) return
+      const payload: PasskeyRegisterIn = {
+        challenge,
+        name: 'Acesso rápido',
+        credential: {
+          id: credential.id,
+          rawId: bytesToBase64Url(credential.rawId),
+          type: 'public-key',
+          response: {
+            clientDataJSON: bytesToBase64Url(resp.clientDataJSON),
+            attestationObject: bytesToBase64Url(resp.attestationObject),
+            transports: resp.getTransports?.(),
+          },
+        },
+      }
+      await TwoFactorApi.passkeyRegisterVerify(payload)
+      setShowPasskeyPrompt(false)
+      setPasskeyPromptMsg('Passkey ativada com sucesso! Na próxima vez, entre com 1 clique.')
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'NotAllowedError')) {
+        setPasskeyPromptMsg(humanizeError(err, 'Não foi possível ativar a Passkey agora.'))
+      }
+    } finally {
+      setPasskeyPromptBusy(false)
+    }
+  }
+
   async function handleLogout() {
     await logout()
     navigate('/login', { replace: true })
@@ -101,6 +161,39 @@ export function Dashboard() {
           Sair
         </button>
       </header>
+
+      {showPasskeyPrompt && (
+        <section className="card space-y-3 border-brand-200 bg-brand-50/40">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-slate-900">
+              Entrar sem senha da próxima vez?
+            </h2>
+            <p className="text-sm text-slate-600">
+              Ative uma Passkey (digital, Face ID ou chave do dispositivo) para acessar sua conta em
+              1 clique, com máxima proteção contra phishing.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void handleQuickRegisterPasskey()}
+              disabled={passkeyPromptBusy}
+              className="btn-primary"
+            >
+              {passkeyPromptBusy ? 'Aguardando dispositivo…' : 'Ativar Passkey em 1 clique'}
+            </button>
+            <button type="button" onClick={() => setShowPasskeyPrompt(false)} className="btn-ghost">
+              Agora não
+            </button>
+          </div>
+        </section>
+      )}
+
+      {passkeyPromptMsg && (
+        <p role="status" className="text-sm text-green-700">
+          {passkeyPromptMsg}
+        </p>
+      )}
 
       <section className="card">
         <Link to="/security" className="btn-ghost inline-block">

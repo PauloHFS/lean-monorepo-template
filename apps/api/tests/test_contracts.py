@@ -24,9 +24,8 @@ def _openapi_schemas() -> dict[str, Any]:
 
 
 def test_login_declares_login_out_response_model() -> None:
-    assert _openapi_response_schema("/api/v1/auth/login")["$ref"] == (
-        "#/components/schemas/LoginOut"
-    )
+    for path in ("/api/v1/auth/login", "/api/v1/auth/otp/email/verify"):
+        assert _openapi_response_schema(path)["$ref"] == ("#/components/schemas/LoginOut")
 
 
 def test_verify_routes_declare_ok_out_response_model() -> None:
@@ -38,6 +37,7 @@ def test_verify_routes_declare_ok_out_response_model() -> None:
         "/api/v1/auth/password/change",
         "/api/v1/auth/password/forgot",
         "/api/v1/auth/password/reset",
+        "/api/v1/auth/otp/email/request",
     ):
         assert _openapi_response_schema(path)["$ref"] == "#/components/schemas/OkOut"
 

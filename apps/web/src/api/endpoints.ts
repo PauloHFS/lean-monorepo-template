@@ -5,6 +5,8 @@
 
 import { api } from './client'
 import type {
+  EmailOtpRequestIn,
+  EmailOtpVerifyIn,
   EnqueueEmailIn,
   EnqueueEmailOut,
   ForgotPasswordIn,
@@ -35,6 +37,10 @@ export const AuthApi = {
   changePassword: (body: PasswordChangeIn) => api.post<OkOut>('/api/v1/auth/password/change', body),
   forgotPassword: (body: ForgotPasswordIn) => api.post<OkOut>('/api/v1/auth/password/forgot', body),
   resetPassword: (body: ResetPasswordIn) => api.post<OkOut>('/api/v1/auth/password/reset', body),
+  requestEmailOtp: (body: EmailOtpRequestIn) =>
+    api.post<OkOut>('/api/v1/auth/otp/email/request', body),
+  verifyEmailOtp: (body: EmailOtpVerifyIn) =>
+    api.post<LoginOut>('/api/v1/auth/otp/email/verify', body),
 }
 
 export const HealthApi = {
