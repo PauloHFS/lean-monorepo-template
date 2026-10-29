@@ -116,6 +116,15 @@ if [[ -n "$_shell_backup_dir" ]]; then
 fi
 
 # POSTGRES_CONTAINER vazio = modo host (pg_dump local, como sempre).
+# Se POSTGRES_CONTAINER estiver preenchido, mas não houver `docker` no PATH e
+# já estivermos rodando dentro de um container (/.dockerenv) com `pg_dump`
+# local, muda automaticamente para o modo local (ex.: Scheduled Task do Coolify
+# rodando dentro do container `postgres`).
+if [[ -n "$POSTGRES_CONTAINER" ]] && ! command -v docker >/dev/null 2>&1 && [[ -f /.dockerenv ]] && command -v pg_dump >/dev/null 2>&1; then
+  POSTGRES_CONTAINER=""
+  POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
+fi
+
 # Com valor = modo container: o dump sai de dentro do container do Postgres
 # (docker compose exec), então POSTGRES_HOST/PORT não são usados.
 if [[ -z "$POSTGRES_CONTAINER" ]]; then
@@ -153,6 +162,47 @@ BACKUP_ENCRYPT_PASSPHRASE="${BACKUP_ENCRYPT_PASSPHRASE:-}"
 : "${BACKUP_KEEP_DAYS:=14}"
 : "${BACKUP_KEEP_COUNT:=14}"
 BACKUP_DIR="${BACKUP_DIR:-/tmp/lean-monorepo-backups}"
+# Se estiver rodando dentro do container postgres (com volume em /var/lib/postgresql)
+# e BACKUP_DIR ainda estiver no default efêmero /tmp/lean-monorepo-backups, grava em
+# /var/lib/postgresql/backups para persistir no volume pgdata entre deploys.
+if [[ -f /.dockerenv && -d /var/lib/postgresql && "$BACKUP_DIR" == "/tmp/lean-monorepo-backups" && -z "$_shell_backup_dir" ]]; then
+  BACKUP_DIR="/var/lib/postgresql/backups"
+fi
+
+# Se RCLONE_BUCKET estiver preenchido e RCLONE_CONFIG_R2_* ainda não estiverem
+# definidas, mapeia automaticamente R2_ACCOUNT_ID / R2_ACCESS_KEY_ID /
+# R2_SECRET_ACCESS_KEY (ou R2_ENDPOINT) para variáveis nativas do rclone.
+# Isso permite configurar o Cloudflare R2 apenas com variáveis no .env do Coolify,
+# sem precisar criar ~/.config/rclone/rclone.conf na VPS.
+if [[ -n "$RCLONE_BUCKET" && "${RCLONE_REMOTE_NAME}" == "r2" ]]; then
+  export RCLONE_CONFIG_R2_TYPE="${RCLONE_CONFIG_R2_TYPE:-s3}"
+  export RCLONE_CONFIG_R2_PROVIDER="${RCLONE_CONFIG_R2_PROVIDER:-Cloudflare}"
+  export RCLONE_CONFIG_R2_NO_CHECK_BUCKET="${RCLONE_CONFIG_R2_NO_CHECK_BUCKET:-true}"
+  if [[ -n "${R2_ACCESS_KEY_ID:-}" && -z "${RCLONE_CONFIG_R2_ACCESS_KEY_ID:-}" ]]; then
+    export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+  fi
+  if [[ -n "${R2_SECRET_ACCESS_KEY:-}" && -z "${RCLONE_CONFIG_R2_SECRET_ACCESS_KEY:-}" ]]; then
+    export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+  fi
+  if [[ -z "${RCLONE_CONFIG_R2_ENDPOINT:-}" ]]; then
+    if [[ -n "${R2_ENDPOINT:-}" ]]; then
+      export RCLONE_CONFIG_R2_ENDPOINT="$R2_ENDPOINT"
+    elif [[ -n "${R2_ACCOUNT_ID:-}" ]]; then
+      export RCLONE_CONFIG_R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+    fi
+  fi
+fi
+
+# Auto-instala openssl / rclone no Alpine (ex.: container postgres:18-alpine em
+# Scheduled Task do Coolify) caso sejam necessários e não estejam presentes.
+if [[ -n "$BACKUP_ENCRYPT_PASSPHRASE" ]] && ! command -v openssl >/dev/null 2>&1 && command -v apk >/dev/null 2>&1 && [[ "$(id -u)" -eq 0 ]]; then
+  echo "[backup] instalando openssl via apk..."
+  apk add --no-cache -q openssl
+fi
+if [[ -n "$RCLONE_BUCKET" ]] && ! command -v rclone >/dev/null 2>&1 && command -v apk >/dev/null 2>&1 && [[ "$(id -u)" -eq 0 ]]; then
+  echo "[backup] instalando rclone via apk..."
+  apk add --no-cache -q rclone
+fi
 
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 KEEP_DAYS="${BACKUP_KEEP_DAYS}"

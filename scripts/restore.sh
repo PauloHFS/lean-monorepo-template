@@ -145,6 +145,14 @@ POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-$_shell_container}"
 BACKUP_COMPOSE_FILE="${BACKUP_COMPOSE_FILE:-$_shell_compose_file}"
 
 # POSTGRES_CONTAINER vazio = modo host (pg_restore local, como sempre).
+# Se POSTGRES_CONTAINER estiver preenchido, mas não houver `docker` no PATH e
+# já estivermos rodando dentro de um container (/.dockerenv) com `pg_restore`
+# local, muda automaticamente para o modo local.
+if [[ -n "$POSTGRES_CONTAINER" ]] && ! command -v docker >/dev/null 2>&1 && [[ -f /.dockerenv ]] && command -v pg_restore >/dev/null 2>&1; then
+  POSTGRES_CONTAINER=""
+  POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
+fi
+
 # Com valor = modo container: o dump do host é streamed para o pg_restore do
 # container via stdin (docker compose exec).
 if [[ -z "${BACKUP_COMPOSE_FILE:-}" ]]; then
