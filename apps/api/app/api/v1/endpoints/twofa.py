@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal, cast
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -10,6 +12,7 @@ from sqlalchemy import CursorResult, text
 from webauthn import base64url_to_bytes
 
 from app.api.deps import DB, CurrentUser
+from app.api.schemas import OkOut
 from app.core import totp as totp_mod
 from app.core import webauthn as wa
 from app.core.logging import get_logger
@@ -64,8 +67,107 @@ class TwoFactorVerifyIn(BaseModel):
     code: str = Field(min_length=6, max_length=64)
 
 
-class OkOut(BaseModel):
-    ok: bool
+class PasskeyItemOut(BaseModel):
+    id: UUID
+    name: str
+    created_at: datetime
+    last_used_at: datetime | None = None
+
+
+class TwoFactorStatusOut(BaseModel):
+    totp_enabled: bool
+    totp_confirmed_at: datetime | None = None
+    recovery_codes_remaining: int
+    passkeys: list[PasskeyItemOut]
+
+
+@router.get("/status", response_model=TwoFactorStatusOut)
+async def twofa_status(user: CurrentUser, session: DB) -> TwoFactorStatusOut:
+    """Retorna o status atual de 2FA do usuário autenticado (TOTP + recovery codes + passkeys)."""
+    rem_row = (
+        await session.execute(
+            text(
+                """
+                SELECT COUNT(*)::int AS cnt
+                  FROM totp_recovery_codes
+                 WHERE user_id = :uid AND used_at IS NULL
+                """
+            ),
+            {"uid": user.id},
+        )
+    ).scalar_one()
+    pk_rows = (
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT id, name, created_at, last_used_at
+                      FROM user_passkeys
+                     WHERE user_id = :uid
+                     ORDER BY created_at DESC
+                    """
+                ),
+                {"uid": user.id},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return TwoFactorStatusOut(
+        totp_enabled=bool(user.totp_enabled),
+        totp_confirmed_at=user.totp_confirmed_at,
+        recovery_codes_remaining=int(rem_row or 0),
+        passkeys=[PasskeyItemOut(**dict(r)) for r in pk_rows],
+    )
+
+
+@router.post("/totp/disable", response_model=OkOut)
+async def totp_disable(user: CurrentUser, session: DB) -> OkOut:
+    """Desativa o TOTP e apaga o segredo e códigos de recuperação."""
+    await session.execute(
+        text(
+            """
+            UPDATE users
+               SET totp_enabled = FALSE,
+                   totp_secret_enc = NULL,
+                   totp_confirmed_at = NULL
+             WHERE id = :id
+            """
+        ),
+        {"id": user.id},
+    )
+    await session.execute(
+        text("DELETE FROM totp_recovery_codes WHERE user_id = :uid"),
+        {"uid": user.id},
+    )
+    await session.commit()
+    logger.info("2fa.totp.disabled", user_id=str(user.id))
+    return OkOut(ok=True)
+
+
+@router.post("/totp/recovery-codes/regenerate", response_model=TotpConfirmOut)
+async def totp_regenerate_recovery_codes(user: CurrentUser, session: DB) -> TotpConfirmOut:
+    """Invalida os códigos de recuperação atuais e gera 10 novos (requer TOTP ativo)."""
+    if not user.totp_enabled:
+        raise HTTPException(400, "totp is not enabled")
+    codes = totp_mod.generate_recovery_codes()
+    await session.execute(
+        text("DELETE FROM totp_recovery_codes WHERE user_id = :uid"),
+        {"uid": user.id},
+    )
+    for code in codes:
+        await session.execute(
+            text(
+                """
+                INSERT INTO totp_recovery_codes (user_id, code_hash)
+                VALUES (:uid, :h)
+                """
+            ),
+            {"uid": user.id, "h": totp_mod.hash_recovery_code(code)},
+        )
+    await session.commit()
+    logger.info("2fa.totp.recovery_codes_regenerated", user_id=str(user.id))
+    return TotpConfirmOut(enabled=True, recovery_codes=codes)
 
 
 @router.post("/totp/setup", response_model=TotpSetupOut)
@@ -308,6 +410,7 @@ class PasskeyRegisterIn(BaseModel):
     # "challenge_b64:pending_token" (~77 chars); folga para variações.
     challenge: str = Field(min_length=8, max_length=1024)
     credential: PasskeyRegistrationCredential
+    name: str | None = Field(default=None, max_length=100)
 
 
 class PasskeyLoginIn(BaseModel):
@@ -388,12 +491,13 @@ async def passkey_register_verify(
         challenge_b64=challenge_b64,
         credential=payload.credential.model_dump(exclude_none=True),
     )
+    key_name = (payload.name or "").strip() or "passkey"
     await session.execute(
         text(
             """
             INSERT INTO user_passkeys
-                (user_id, credential_id, public_key, sign_count, transports)
-            VALUES (:uid, :cid, :pk, :sc, NULL)
+                (user_id, credential_id, public_key, sign_count, name, transports)
+            VALUES (:uid, :cid, :pk, :sc, :name, NULL)
             """
         ),
         {
@@ -401,10 +505,27 @@ async def passkey_register_verify(
             "cid": info["credential_id"],
             "pk": info["public_key"],
             "sc": info["sign_count"],
+            "name": key_name,
         },
     )
     await session.commit()
     logger.info("2fa.passkey.registered", user_id=str(user.id))
+
+
+@router.delete("/passkey/{passkey_id}", status_code=204, response_model=None)
+async def passkey_delete(passkey_id: UUID, user: CurrentUser, session: DB) -> None:
+    """Remove uma passkey cadastrada do usuário autenticado."""
+    res = cast(
+        CursorResult[Any],
+        await session.execute(
+            text("DELETE FROM user_passkeys WHERE id = :id AND user_id = :uid"),
+            {"id": passkey_id, "uid": user.id},
+        ),
+    )
+    await session.commit()
+    if not res.rowcount:
+        raise HTTPException(404, "passkey not found")
+    logger.info("2fa.passkey.deleted", user_id=str(user.id), passkey_id=str(passkey_id))
 
 
 @router.post(
@@ -528,6 +649,115 @@ async def passkey_login_verify(
         await session.commit()
 
     logger.info("2fa.passkey.login.success", user_id=str(user_id))
+    set_session_cookie(response, token)
+    return OkOut(ok=True)
+
+
+@router.post(
+    "/passkey/passwordless/options",
+    response_model=PasskeyLoginOptionsOut,
+    dependencies=[Depends(rate_limit("2fa.passkey.passwordless.options", limit=20, window_s=60))],
+)
+async def passkey_passwordless_options(request: Request) -> PasskeyLoginOptionsOut:
+    """Gera options para login direto com passkey (discoverable credential, sem senha)."""
+    options, challenge_b64 = wa.authentication_options([])
+    token = await totp_mod.store_pending(
+        "passwordless",
+        ip=request.client.host if request.client else None,
+        ua=request.headers.get("user-agent"),
+        challenge=challenge_b64,
+    )
+    return PasskeyLoginOptionsOut(
+        options=PasskeyAuthenticationOptionsOut.model_validate(options),
+        challenge=f"{challenge_b64}:{token}",
+    )
+
+
+@router.post(
+    "/passkey/passwordless/verify",
+    response_model=OkOut,
+    dependencies=[Depends(rate_limit("2fa.passkey.passwordless.verify", limit=20, window_s=60))],
+)
+async def passkey_passwordless_verify(
+    payload: PasskeyLoginIn, request: Request, response: Response
+) -> OkOut:
+    """Verifica assertion de login passwordless (discoverable credential) e emite cookie."""
+    try:
+        challenge_b64, pending_token = _split_challenge(payload.challenge)
+        pending = await _consume_challenge(pending_token, challenge_b64)
+    except HTTPException as exc:
+        logger.warning("2fa.passkey.passwordless.failure", reason=str(exc.detail))
+        raise
+    if pending.get("user_id") != "passwordless":
+        logger.warning("2fa.passkey.passwordless.failure", reason="wrong_pending_scope")
+        raise HTTPException(400, "invalid challenge")
+
+    credential_id = _credential_id(payload.credential)
+
+    async with SessionLocal() as session:
+        async with session.begin():
+            pk = (
+                (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT p.user_id, p.credential_id, p.public_key, p.sign_count, u.is_active
+                              FROM user_passkeys p
+                              JOIN users u ON u.id = p.user_id
+                             WHERE p.credential_id = :cid
+                            """
+                        ),
+                        {"cid": credential_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if pk is None or not pk["is_active"]:
+            logger.warning("2fa.passkey.passwordless.failure", reason="unknown_or_inactive_passkey")
+            raise HTTPException(401, "invalid passkey")
+
+        user_id = pk["user_id"]
+        try:
+            new_sign_count = wa.complete_authentication(
+                challenge_b64=challenge_b64,
+                credential=payload.credential.model_dump(exclude_none=True),
+                public_key=bytes(pk["public_key"]),
+                sign_count=pk["sign_count"],
+            )
+        except Exception as exc:
+            logger.warning(
+                "2fa.passkey.passwordless.failure",
+                user_id=str(user_id),
+                reason=type(exc).__name__,
+            )
+            raise
+
+        await session.execute(
+            text(PASSKEY_UPDATE_SQL),
+            {"sc": new_sign_count, "cid": credential_id, "uid": user_id},
+        )
+        await session.commit()
+
+        token = generate_session_token()
+        await session.execute(
+            text(
+                """
+                INSERT INTO sessions (user_id, token_hash, user_agent, ip, expires_at)
+                VALUES (:uid, :th, :ua, :ip, :exp)
+                """
+            ),
+            {
+                "uid": user_id,
+                "th": hash_session_token(token),
+                "ua": request.headers.get("user-agent"),
+                "ip": request.client.host if request.client else None,
+                "exp": session_expiry(),
+            },
+        )
+        await session.commit()
+
+    logger.info("2fa.passkey.passwordless.success", user_id=str(user_id))
     set_session_cookie(response, token)
     return OkOut(ok=True)
 

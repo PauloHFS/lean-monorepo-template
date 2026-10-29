@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { Navigate, useLocation, useNavigate } from 'react-router'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router'
 import { z } from 'zod'
 
 import { AuthApi, TwoFactorApi } from '../api/endpoints'
@@ -138,6 +138,55 @@ export function Login() {
     }
   }
 
+  async function onPasswordlessPasskey() {
+    if (passkeyBusy) return
+    setSubmitError(null)
+    setPasskeyBusy(true)
+    try {
+      const { options, challenge } = await TwoFactorApi.passkeyPasswordlessOptions()
+
+      const credential = await navigator.credentials.get({
+        publicKey: toAuthenticationOptions(options),
+      })
+
+      if (!(credential instanceof PublicKeyCredential)) {
+        setSubmitError('Autenticação cancelada.')
+        return
+      }
+
+      const resp = credential.response
+      if (!(resp instanceof AuthenticatorAssertionResponse)) {
+        setSubmitError('Resposta inesperada do autenticador.')
+        return
+      }
+
+      const credentialPayload: PasskeyAuthenticationCredential = {
+        id: credential.id,
+        rawId: bytesToBase64Url(credential.rawId),
+        type: 'public-key',
+        response: {
+          clientDataJSON: bytesToBase64Url(resp.clientDataJSON),
+          authenticatorData: bytesToBase64Url(resp.authenticatorData),
+          signature: bytesToBase64Url(resp.signature),
+          userHandle: resp.userHandle ? bytesToBase64Url(resp.userHandle) : undefined,
+        },
+      }
+      await TwoFactorApi.passkeyPasswordlessVerify({ challenge, credential: credentialPayload })
+
+      const me = await AuthApi.me()
+      setUser(me)
+      navigate(from, { replace: true })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'NotAllowedError') {
+        setSubmitError('Autenticação cancelada pelo usuário.')
+      } else {
+        setSubmitError(humanizeError(err, 'Não foi possível entrar com a passkey.'))
+      }
+    } finally {
+      setPasskeyBusy(false)
+    }
+  }
+
   function onCancel2fa() {
     // O pending token expira sozinho no servidor; aqui só voltamos ao início.
     setPending(null)
@@ -258,9 +307,14 @@ export function Login() {
         </div>
 
         <div className="space-y-1">
-          <label htmlFor="login-password" className="block text-sm text-slate-700">
-            Senha
-          </label>
+          <div className="flex items-center justify-between">
+            <label htmlFor="login-password" className="block text-sm text-slate-700">
+              Senha
+            </label>
+            <Link to="/forgot-password" className="text-xs text-brand-600 hover:underline">
+              Esqueceu a senha?
+            </Link>
+          </div>
           <input
             id="login-password"
             type="password"
@@ -285,11 +339,27 @@ export function Login() {
 
         <button
           type="submit"
-          disabled={credForm.formState.isSubmitting}
+          disabled={credForm.formState.isSubmitting || passkeyBusy}
           className="btn-primary w-full"
         >
           {credForm.formState.isSubmitting ? 'Entrando…' : 'Entrar'}
         </button>
+
+        <button
+          type="button"
+          onClick={() => void onPasswordlessPasskey()}
+          disabled={passkeyBusy || credForm.formState.isSubmitting}
+          className="btn-ghost w-full"
+        >
+          {passkeyBusy ? 'Aguardando autenticador…' : 'Entrar com passkey'}
+        </button>
+
+        <p className="text-center text-sm text-slate-600">
+          Não tem uma conta?{' '}
+          <Link to="/register" className="font-medium text-brand-600 hover:underline">
+            Criar conta
+          </Link>
+        </p>
       </form>
     </main>
   )

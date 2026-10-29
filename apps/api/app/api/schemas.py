@@ -25,3 +25,7 @@ class UserOut(BaseModel):
 class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     db: bool
+
+
+class OkOut(BaseModel):
+    ok: bool

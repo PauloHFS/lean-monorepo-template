@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 
 import { HealthApi, UsersApi } from '../api/endpoints'
-import type { EnqueueEmailOut, HealthResponse } from '../api/types'
+import type { EnqueueEmailOut, HealthResponse, UserOut } from '../api/types'
 import { useAuth } from '../lib/auth'
 import { humanizeError } from '../lib/errors'
 
@@ -14,6 +14,10 @@ export function Dashboard() {
   const [enqueueing, setEnqueueing] = useState(false)
   const [enqueueError, setEnqueueError] = useState<string | null>(null)
   const [lastJob, setLastJob] = useState<EnqueueEmailOut | null>(null)
+
+  const [usersList, setUsersList] = useState<UserOut[]>([])
+  const [usersBusy, setUsersBusy] = useState(false)
+  const [usersError, setUsersError] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -28,6 +32,22 @@ export function Dashboard() {
       alive = false
     }
   }, [])
+
+  const loadUsers = useCallback(async () => {
+    if (!user?.is_superuser) return
+    setUsersError(null)
+    try {
+      const list = await UsersApi.list()
+      setUsersList(list)
+    } catch {
+      // Silencioso no mount: specs E2E mockados que não interceptam GET /users
+      // continuam testando apenas o card de job sem ruído de alerta.
+    }
+  }, [user?.is_superuser])
+
+  useEffect(() => {
+    void loadUsers()
+  }, [loadUsers])
 
   // O RequireAuth garante a sessão; isto é só estreitamento de tipo.
   if (!user) return null
@@ -47,6 +67,21 @@ export function Dashboard() {
       setEnqueueError(humanizeError(err, 'Sua sessão expirou. Entre novamente.'))
     } finally {
       setEnqueueing(false)
+    }
+  }
+
+  async function handleDeleteUser(targetId: string, targetEmail: string) {
+    if (usersBusy) return
+    if (!window.confirm(`Remover o usuário ${targetEmail}?`)) return
+    setUsersBusy(true)
+    setUsersError(null)
+    try {
+      await UsersApi.delete(targetId)
+      setUsersList((prev) => prev.filter((u) => u.id !== targetId))
+    } catch (err) {
+      setUsersError(humanizeError(err, 'Não foi possível remover o usuário.'))
+    } finally {
+      setUsersBusy(false)
     }
   }
 
@@ -114,6 +149,50 @@ export function Dashboard() {
           {lastJob && (
             <p role="status" className="text-sm">
               Último job: <span className="font-mono">{lastJob.job_id}</span> ({lastJob.status})
+            </p>
+          )}
+        </section>
+      )}
+
+      {user.is_superuser && usersList.length > 0 && (
+        <section className="card space-y-3">
+          <header className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-semibold">Usuários cadastrados</h2>
+            <span className="text-xs text-slate-500">{usersList.length} usuário(s)</span>
+          </header>
+          <ul className="divide-y divide-slate-200 rounded-md border border-slate-200">
+            {usersList.map((u) => (
+              <li
+                key={u.id}
+                className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
+              >
+                <div>
+                  <p className="font-medium text-slate-800">
+                    {u.email}{' '}
+                    {u.is_superuser && (
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
+                        admin
+                      </span>
+                    )}
+                  </p>
+                  {u.full_name && <p className="text-xs text-slate-500">{u.full_name}</p>}
+                </div>
+                {u.id !== user.id && (
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteUser(u.id, u.email)}
+                    disabled={usersBusy}
+                    className="btn-ghost text-xs text-red-600 hover:bg-red-50"
+                  >
+                    Remover
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+          {usersError && (
+            <p role="alert" className="text-sm text-red-600">
+              {usersError}
             </p>
           )}
         </section>

@@ -10,10 +10,13 @@ A tabela `users` tem colunas `totp_enabled`/`totp_secret_enc`. O usuário liga q
 1. UI chama `/auth/2fa/totp/setup` → recebe `{secret, otpauth_uri}` (mostra QR)
 2. UI chama `/auth/2fa/totp/confirm` com o primeiro código → TOTP ativo, recebe 10 recovery codes (mostrar 1x só)
 3. Próximo login: senha OK → UI mostra campo de código → `/auth/2fa/verify` → cookie setado
+4. Gestão em `/security`: `/auth/2fa/status` informa estado atual e códigos restantes; `/auth/2fa/totp/recovery-codes/regenerate` gera 10 novos códigos e `/auth/2fa/totp/disable` desativa o TOTP.
 
 **Passkey (Touch ID, Face ID, chave de segurança):**
-1. UI chama `/auth/2fa/passkey/register/options` → `navigator.credentials.create()` → `register/verify`
-2. Próximo login: botão "Usar passkey" → `navigator.credentials.get()` → `/auth/2fa/passkey/login/verify` → cookie setado
+1. UI chama `/auth/2fa/passkey/register/options` → `navigator.credentials.create()` → `register/verify` (aceita `name` opcional do dispositivo)
+2. Login 2FA (após senha): botão "Usar passkey" → `navigator.credentials.get()` → `/auth/2fa/passkey/login/verify` → cookie setado
+3. Login direto sem senha (passwordless / discoverable credential): botão "Entrar com passkey" em `/login` → `/auth/2fa/passkey/passwordless/options` → `navigator.credentials.get()` → `/auth/2fa/passkey/passwordless/verify` → cookie setado
+4. Gestão em `/security`: lista passkeys cadastradas e permite remover via `DELETE /auth/2fa/passkey/{passkey_id}`.
 
 Recovery codes são aceitos no lugar do TOTP (caso o usuário perca o app).
 
@@ -25,9 +28,9 @@ Recovery codes são aceitos no lugar do TOTP (caso o usuário perca o app).
 - Sessão: **token opaco** em cookie `HttpOnly`, `SameSite=Lax`, `Secure` em prod.
 - O cookie armazena o token cru; o banco guarda `sha256(token)` em `sessions.token_hash` (índice unique).
 - Logout = `DELETE FROM sessions WHERE token_hash = …` → revogação instantânea.
-- Endpoints em `/api/v1/auth/{register,login,logout,me}`.
+- Endpoints em `/api/v1/auth/{register,login,logout,me}` e gestão de senha em `/api/v1/auth/password/{change,forgot,reset}` (com envio de link de recuperação via fila `email.send` e revogação de sessões ao redefinir/alterar senha).
 - `/auth/login` responde no mesmo tempo para e-mail inexistente e senha errada (verificação contra um hash dummy de custo equivalente) e emite log de auditoria com um fingerprint do e-mail — nunca o endereço cru.
-- `GET /users` e `POST /users/enqueue-email` são **superuser-only** (403 para os demais). `DELETE /users/{id}` permite o próprio usuário ou um superuser.
+- `GET /users` e `POST /users/enqueue-email` são **superuser-only** (403 para os demais). `DELETE /users/{id}` permite o próprio usuário (em `/security`) ou um superuser (no `/dashboard`).
 
 ---
 

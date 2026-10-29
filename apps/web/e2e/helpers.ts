@@ -40,8 +40,9 @@ export function mockUnauthenticated(page: Page): Promise<void> {
 }
 
 /** Sessão autenticada: /auth/me devolve o usuário fake (libera o Dashboard). */
-export function mockAuthenticated(page: Page): Promise<void> {
-  return page.route('**/api/v1/auth/me', (route) => mockJson(route, 200, mockUser))
+export async function mockAuthenticated(page: Page): Promise<void> {
+  await page.route('**/api/v1/auth/me', (route) => mockJson(route, 200, mockUser))
+  await page.route('**/api/v1/users?**', (route) => mockJson(route, 200, [mockUser]))
 }
 
 /** Healthz mockado para o card "Saúde do sistema" do Dashboard. */

@@ -112,6 +112,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/password/change": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Change Password */
+        post: operations["change_password_api_v1_auth_password_change_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/password/forgot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Forgot Password */
+        post: operations["forgot_password_api_v1_auth_password_forgot_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/password/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset Password */
+        post: operations["reset_password_api_v1_auth_password_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/2fa/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Twofa Status
+         * @description Retorna o status atual de 2FA do usuário autenticado (TOTP + recovery codes + passkeys).
+         */
+        get: operations["twofa_status_api_v1_auth_2fa_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/2fa/totp/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Totp Disable
+         * @description Desativa o TOTP e apaga o segredo e códigos de recuperação.
+         */
+        post: operations["totp_disable_api_v1_auth_2fa_totp_disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/2fa/totp/recovery-codes/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Totp Regenerate Recovery Codes
+         * @description Invalida os códigos de recuperação atuais e gera 10 novos (requer TOTP ativo).
+         */
+        post: operations["totp_regenerate_recovery_codes_api_v1_auth_2fa_totp_recovery_codes_regenerate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/2fa/totp/setup": {
         parameters: {
             query?: never;
@@ -212,6 +323,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/2fa/passkey/{passkey_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Passkey Delete
+         * @description Remove uma passkey cadastrada do usuário autenticado.
+         */
+        delete: operations["passkey_delete_api_v1_auth_2fa_passkey__passkey_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/2fa/passkey/login/options": {
         parameters: {
             query?: never;
@@ -246,6 +377,46 @@ export interface paths {
          * @description Verifica assertion e emite cookie.
          */
         post: operations["passkey_login_verify_api_v1_auth_2fa_passkey_login_verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/2fa/passkey/passwordless/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Passkey Passwordless Options
+         * @description Gera options para login direto com passkey (discoverable credential, sem senha).
+         */
+        post: operations["passkey_passwordless_options_api_v1_auth_2fa_passkey_passwordless_options_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/2fa/passkey/passwordless/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Passkey Passwordless Verify
+         * @description Verifica assertion de login passwordless (discoverable credential) e emite cookie.
+         */
+        post: operations["passkey_passwordless_verify_api_v1_auth_2fa_passkey_passwordless_verify_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -345,6 +516,14 @@ export interface components {
             job_id: number;
             /** Status */
             status: string;
+        };
+        /** ForgotPasswordIn */
+        ForgotPasswordIn: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -463,6 +642,23 @@ export interface components {
              */
             type: "public-key";
         };
+        /** PasskeyItemOut */
+        PasskeyItemOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Last Used At */
+            last_used_at?: string | null;
+        };
         /** PasskeyLoginIn */
         PasskeyLoginIn: {
             /** Challenge */
@@ -490,6 +686,8 @@ export interface components {
             /** Challenge */
             challenge: string;
             credential: components["schemas"]["PasskeyRegistrationCredential"];
+            /** Name */
+            name?: string | null;
         };
         /** PasskeyRegisterOptionsOut */
         PasskeyRegisterOptionsOut: {
@@ -554,6 +752,13 @@ export interface components {
             /** Displayname */
             displayName: string;
         };
+        /** PasswordChangeIn */
+        PasswordChangeIn: {
+            /** Current Password */
+            current_password: string;
+            /** New Password */
+            new_password: string;
+        };
         /** PendingIn */
         PendingIn: {
             /** Pending Token */
@@ -570,6 +775,13 @@ export interface components {
             password: string;
             /** Full Name */
             full_name?: string | null;
+        };
+        /** ResetPasswordIn */
+        ResetPasswordIn: {
+            /** Token */
+            token: string;
+            /** New Password */
+            new_password: string;
         };
         /** TotpConfirmIn */
         TotpConfirmIn: {
@@ -589,6 +801,17 @@ export interface components {
             secret: string;
             /** Otpauth Uri */
             otpauth_uri: string;
+        };
+        /** TwoFactorStatusOut */
+        TwoFactorStatusOut: {
+            /** Totp Enabled */
+            totp_enabled: boolean;
+            /** Totp Confirmed At */
+            totp_confirmed_at?: string | null;
+            /** Recovery Codes Remaining */
+            recovery_codes_remaining: number;
+            /** Passkeys */
+            passkeys: components["schemas"]["PasskeyItemOut"][];
         };
         /** TwoFactorVerifyIn */
         TwoFactorVerifyIn: {
@@ -782,6 +1005,165 @@ export interface operations {
             };
         };
     };
+    change_password_api_v1_auth_password_change_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordChangeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    forgot_password_api_v1_auth_password_forgot_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForgotPasswordIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_password_api_v1_auth_password_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    twofa_status_api_v1_auth_2fa_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TwoFactorStatusOut"];
+                };
+            };
+        };
+    };
+    totp_disable_api_v1_auth_2fa_totp_disable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkOut"];
+                };
+            };
+        };
+    };
+    totp_regenerate_recovery_codes_api_v1_auth_2fa_totp_recovery_codes_regenerate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TotpConfirmOut"];
+                };
+            };
+        };
+    };
     totp_setup_api_v1_auth_2fa_totp_setup_post: {
         parameters: {
             query?: never;
@@ -919,6 +1301,35 @@ export interface operations {
             };
         };
     };
+    passkey_delete_api_v1_auth_2fa_passkey__passkey_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                passkey_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     passkey_login_options_api_v1_auth_2fa_passkey_login_options_post: {
         parameters: {
             query?: never;
@@ -953,6 +1364,59 @@ export interface operations {
         };
     };
     passkey_login_verify_api_v1_auth_2fa_passkey_login_verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasskeyLoginIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    passkey_passwordless_options_api_v1_auth_2fa_passkey_passwordless_options_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasskeyLoginOptionsOut"];
+                };
+            };
+        };
+    };
+    passkey_passwordless_verify_api_v1_auth_2fa_passkey_passwordless_verify_post: {
         parameters: {
             query?: never;
             header?: never;

@@ -30,8 +30,24 @@ def test_login_declares_login_out_response_model() -> None:
 
 
 def test_verify_routes_declare_ok_out_response_model() -> None:
-    for path in ("/api/v1/auth/2fa/verify", "/api/v1/auth/2fa/passkey/login/verify"):
+    for path in (
+        "/api/v1/auth/2fa/verify",
+        "/api/v1/auth/2fa/passkey/login/verify",
+        "/api/v1/auth/2fa/passkey/passwordless/verify",
+        "/api/v1/auth/2fa/totp/disable",
+        "/api/v1/auth/password/change",
+        "/api/v1/auth/password/forgot",
+        "/api/v1/auth/password/reset",
+    ):
         assert _openapi_response_schema(path)["$ref"] == "#/components/schemas/OkOut"
+
+
+def test_twofa_status_declares_response_model() -> None:
+    schema: dict[str, Any] = app.openapi()
+    res = schema["paths"]["/api/v1/auth/2fa/status"]["get"]["responses"]["200"]
+    assert res["content"]["application/json"]["schema"]["$ref"] == (
+        "#/components/schemas/TwoFactorStatusOut"
+    )
 
 
 def test_openapi_login_200_has_usable_properties() -> None:

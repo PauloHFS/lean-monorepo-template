@@ -29,7 +29,7 @@ test('registrar → login → usuário comum não vê a seção de job', async (
   await page.goto('/login')
   await page.getByLabel('E-mail').fill(email)
   await page.getByLabel('Senha').fill(password)
-  await page.getByRole('button', { name: /entrar/i }).click()
+  await page.getByRole('button', { name: /^entrar$/i }).click()
 
   // 3. Cai no /dashboard
   await expect(page).toHaveURL(/\/dashboard$/)
@@ -49,7 +49,7 @@ test('admin (superuser) → enfileirar job aparece no Dashboard', async ({ page,
   await page.goto('/login')
   await page.getByLabel('E-mail').fill(ADMIN_EMAIL)
   await page.getByLabel('Senha').fill(ADMIN_PASSWORD)
-  await page.getByRole('button', { name: /entrar/i }).click()
+  await page.getByRole('button', { name: /^entrar$/i }).click()
 
   await expect(page).toHaveURL(/\/dashboard$/)
 

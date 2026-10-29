@@ -15,7 +15,7 @@ async function submitCredentials(page: Page): Promise<void> {
   await page.goto('/login')
   await page.getByLabel('E-mail').fill('user@example.com')
   await page.getByLabel('Senha').fill('supersecret123')
-  await page.getByRole('button', { name: /entrar/i }).click()
+  await page.getByRole('button', { name: /^entrar$/i }).click()
 }
 
 test('credenciais inválidas mostram erro em PT-BR', async ({ page }) => {
@@ -110,13 +110,21 @@ test('guard preserva o destino e o login retorna para ele', async ({ page }) => 
     mockJson(route, 401, { detail: 'not authenticated' }),
   )
   await page.route('**/api/v1/healthz', (route) => mockJson(route, 200, { status: 'ok', db: true }))
+  await page.route('**/api/v1/auth/2fa/status', (route) =>
+    mockJson(route, 200, {
+      totp_enabled: false,
+      totp_confirmed_at: null,
+      recovery_codes_remaining: 0,
+      passkeys: [],
+    }),
+  )
 
   await page.goto('/security')
   await expect(page).toHaveURL(/\/login$/)
 
   await page.getByLabel('E-mail').fill('user@example.com')
   await page.getByLabel('Senha').fill('supersecret123')
-  await page.getByRole('button', { name: /entrar/i }).click()
+  await page.getByRole('button', { name: /^entrar$/i }).click()
 
   await expect(page).toHaveURL(/\/security$/)
 })

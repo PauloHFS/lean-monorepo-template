@@ -18,7 +18,7 @@ async function submitCredentials(page: Page, email: string, password: string): P
   await page.goto('/login')
   await page.getByLabel('E-mail').fill(email)
   await page.getByLabel('Senha').fill(password)
-  await page.getByRole('button', { name: /entrar/i }).click()
+  await page.getByRole('button', { name: /^entrar$/i }).click()
 }
 
 async function expectRealSession(

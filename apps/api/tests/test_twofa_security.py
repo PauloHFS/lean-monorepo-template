@@ -74,6 +74,8 @@ def test_passkey_update_sql_filters_by_user() -> None:
         ("/2fa/verify", "2fa.verify", 10, 60),
         ("/2fa/passkey/login/options", "2fa.passkey.login.options", 20, 60),
         ("/2fa/passkey/login/verify", "2fa.passkey.login.verify", 20, 60),
+        ("/2fa/passkey/passwordless/options", "2fa.passkey.passwordless.options", 20, 60),
+        ("/2fa/passkey/passwordless/verify", "2fa.passkey.passwordless.verify", 20, 60),
     ],
 )
 def test_sensitive_endpoint_has_rate_limit(

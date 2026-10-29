@@ -15,10 +15,28 @@ test('app carrega e o formulário de login aparece', async ({ page }) => {
   await page.goto('/')
   await expect(page).toHaveURL(/\/login$/)
 
-  // 2. Login form tem os campos esperados
+  // 2. Login form tem os campos esperados + links de cadastro/recuperação/passkey
   await expect(page.getByLabel('E-mail')).toBeVisible()
   await expect(page.getByLabel('Senha')).toBeVisible()
-  await expect(page.getByRole('button', { name: /entrar/i })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^entrar$/i })).toBeVisible()
+  await expect(page.getByRole('button', { name: /entrar com passkey/i })).toBeVisible()
+  await expect(page.getByRole('link', { name: /criar conta/i })).toBeVisible()
+  await expect(page.getByRole('link', { name: /esqueceu a senha/i })).toBeVisible()
+})
+
+test('página de cadastro (/register) e recuperação (/forgot-password) carregam', async ({
+  page,
+}) => {
+  await mockUnauthenticated(page)
+
+  await page.goto('/register')
+  await expect(page.getByRole('heading', { name: /criar conta/i })).toBeVisible()
+  await expect(page.getByLabel('E-mail')).toBeVisible()
+  await expect(page.getByLabel('Senha')).toBeVisible()
+
+  await page.goto('/forgot-password')
+  await expect(page.getByRole('heading', { name: /recuperar senha/i })).toBeVisible()
+  await expect(page.getByRole('button', { name: /enviar link/i })).toBeVisible()
 })
 
 test('healthz responde', async ({ request }) => {
