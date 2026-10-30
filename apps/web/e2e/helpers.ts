@@ -13,6 +13,30 @@ export const mockUser = {
   is_superuser: true,
 }
 
+export const mockPolicy = {
+  actor: { id: mockUser.id, role: 'admin' },
+  rules: [
+    { resource: 'user', action: 'list', fields: null, when: { kind: 'always' } },
+    { resource: 'user', action: 'read', fields: null, when: { kind: 'always' } },
+    { resource: 'user', action: 'delete', fields: null, when: { kind: 'always' } },
+    { resource: 'user', action: 'update', fields: ['full_name'], when: { kind: 'always' } },
+    {
+      resource: 'user',
+      action: 'update',
+      fields: ['is_active', 'is_superuser'],
+      when: {
+        kind: 'not',
+        cond: {
+          kind: 'eq',
+          left: { kind: 'ref', scope: 'resource', attr: 'id' },
+          right: { kind: 'ref', scope: 'actor', attr: 'id' },
+        },
+      },
+    },
+    { resource: 'email', action: 'create', fields: null, when: { kind: 'always' } },
+  ],
+}
+
 /** true se a API real responde /api/v1/healthz em ~2s. Nunca lança. */
 export async function backendAvailable(request: APIRequestContext): Promise<boolean> {
   try {
@@ -43,6 +67,7 @@ export function mockUnauthenticated(page: Page): Promise<void> {
 export async function mockAuthenticated(page: Page): Promise<void> {
   await page.route('**/api/v1/auth/me', (route) => mockJson(route, 200, mockUser))
   await page.route('**/api/v1/users?**', (route) => mockJson(route, 200, [mockUser]))
+  await page.route('**/api/v1/permissions/me', (route) => mockJson(route, 200, mockPolicy))
 }
 
 /** Healthz mockado para o card "Saúde do sistema" do Dashboard. */

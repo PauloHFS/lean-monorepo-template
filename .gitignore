@@ -32,7 +32,7 @@ apps/web/.tanstack/
 apps/api/openapi.json
 
 # ---- Docker / volumes locais ----
-data/
+/data/
 .pgdata/
 
 # ---- IDEs / OS ----

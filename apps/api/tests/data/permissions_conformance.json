@@ -1,0 +1,2970 @@
+{
+  "version": 1,
+  "policies": {
+    "admin": {
+      "actor": {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "role": "admin"
+      },
+      "rules": [
+        {
+          "resource": "user",
+          "action": "list",
+          "fields": null,
+          "when": {
+            "kind": "always"
+          }
+        },
+        {
+          "resource": "user",
+          "action": "read",
+          "fields": null,
+          "when": {
+            "kind": "always"
+          }
+        },
+        {
+          "resource": "user",
+          "action": "delete",
+          "fields": null,
+          "when": {
+            "kind": "always"
+          }
+        },
+        {
+          "resource": "user",
+          "action": "update",
+          "fields": [
+            "full_name"
+          ],
+          "when": {
+            "kind": "always"
+          }
+        },
+        {
+          "resource": "user",
+          "action": "update",
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "when": {
+            "kind": "not",
+            "cond": {
+              "kind": "eq",
+              "left": {
+                "kind": "ref",
+                "scope": "resource",
+                "attr": "id"
+              },
+              "right": {
+                "kind": "ref",
+                "scope": "actor",
+                "attr": "id"
+              }
+            }
+          }
+        },
+        {
+          "resource": "email",
+          "action": "create",
+          "fields": null,
+          "when": {
+            "kind": "always"
+          }
+        }
+      ]
+    },
+    "member": {
+      "actor": {
+        "id": "00000000-0000-0000-0000-000000000002",
+        "role": "member"
+      },
+      "rules": [
+        {
+          "resource": "user",
+          "action": "read",
+          "fields": null,
+          "when": {
+            "kind": "eq",
+            "left": {
+              "kind": "ref",
+              "scope": "resource",
+              "attr": "id"
+            },
+            "right": {
+              "kind": "ref",
+              "scope": "actor",
+              "attr": "id"
+            }
+          }
+        },
+        {
+          "resource": "user",
+          "action": "delete",
+          "fields": null,
+          "when": {
+            "kind": "eq",
+            "left": {
+              "kind": "ref",
+              "scope": "resource",
+              "attr": "id"
+            },
+            "right": {
+              "kind": "ref",
+              "scope": "actor",
+              "attr": "id"
+            }
+          }
+        },
+        {
+          "resource": "user",
+          "action": "update",
+          "fields": [
+            "full_name"
+          ],
+          "when": {
+            "kind": "eq",
+            "left": {
+              "kind": "ref",
+              "scope": "resource",
+              "attr": "id"
+            },
+            "right": {
+              "kind": "ref",
+              "scope": "actor",
+              "attr": "id"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "actor": "admin",
+      "action": "create",
+      "resource": "user",
+      "entity": null,
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "create",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000001"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "create",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "create",
+      "resource": "email",
+      "entity": null,
+      "can": true,
+      "can_class": true,
+      "fields": null,
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "create",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000001"
+      },
+      "can": true,
+      "can_class": true,
+      "fields": null,
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "create",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": true,
+      "can_class": true,
+      "fields": null,
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "read",
+      "resource": "user",
+      "entity": null,
+      "can": true,
+      "can_class": true,
+      "fields": null,
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "read",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000001"
+      },
+      "can": true,
+      "can_class": true,
+      "fields": null,
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "read",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": true,
+      "can_class": true,
+      "fields": null,
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "read",
+      "resource": "email",
+      "entity": null,
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "read",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000001"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "read",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "list",
+      "resource": "user",
+      "entity": null,
+      "can": true,
+      "can_class": true,
+      "fields": null,
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "list",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000001"
+      },
+      "can": true,
+      "can_class": true,
+      "fields": null,
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "list",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": true,
+      "can_class": true,
+      "fields": null,
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "list",
+      "resource": "email",
+      "entity": null,
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "list",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000001"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "list",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "update",
+      "resource": "user",
+      "entity": null,
+      "can": true,
+      "can_class": true,
+      "fields": [
+        "full_name"
+      ],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "update",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000001"
+      },
+      "can": true,
+      "can_class": true,
+      "fields": [
+        "full_name"
+      ],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "update",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": true,
+      "can_class": true,
+      "fields": [
+        "full_name",
+        "is_active",
+        "is_superuser"
+      ],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "update",
+      "resource": "email",
+      "entity": null,
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "update",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000001"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "update",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "delete",
+      "resource": "user",
+      "entity": null,
+      "can": true,
+      "can_class": true,
+      "fields": null,
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "delete",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000001"
+      },
+      "can": true,
+      "can_class": true,
+      "fields": null,
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "delete",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": true,
+      "can_class": true,
+      "fields": null,
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "delete",
+      "resource": "email",
+      "entity": null,
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "delete",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000001"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "admin",
+      "action": "delete",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "create",
+      "resource": "user",
+      "entity": null,
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "create",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000002"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "create",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "create",
+      "resource": "email",
+      "entity": null,
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "create",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000002"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "create",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "read",
+      "resource": "user",
+      "entity": null,
+      "can": false,
+      "can_class": true,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "read",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000002"
+      },
+      "can": true,
+      "can_class": true,
+      "fields": null,
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "read",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": true,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "read",
+      "resource": "email",
+      "entity": null,
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "read",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000002"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "read",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "list",
+      "resource": "user",
+      "entity": null,
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "list",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000002"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "list",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "list",
+      "resource": "email",
+      "entity": null,
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "list",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000002"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "list",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "update",
+      "resource": "user",
+      "entity": null,
+      "can": false,
+      "can_class": true,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "update",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000002"
+      },
+      "can": true,
+      "can_class": true,
+      "fields": [
+        "full_name"
+      ],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "update",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": true,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "update",
+      "resource": "email",
+      "entity": null,
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "update",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000002"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "update",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "delete",
+      "resource": "user",
+      "entity": null,
+      "can": false,
+      "can_class": true,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "delete",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000002"
+      },
+      "can": true,
+      "can_class": true,
+      "fields": null,
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": true
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": true
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "delete",
+      "resource": "user",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": true,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "delete",
+      "resource": "email",
+      "entity": null,
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "delete",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000002"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    },
+    {
+      "actor": "member",
+      "action": "delete",
+      "resource": "email",
+      "entity": {
+        "id": "00000000-0000-0000-0000-000000000003"
+      },
+      "can": false,
+      "can_class": false,
+      "fields": [],
+      "field_checks": [
+        {
+          "fields": [
+            "full_name"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "is_active",
+            "is_superuser"
+          ],
+          "ok": false
+        },
+        {
+          "fields": [
+            "full_name",
+            "is_active"
+          ],
+          "ok": false
+        }
+      ]
+    }
+  ],
+  "condition_cases": [
+    {
+      "name": "always",
+      "cond": {
+        "kind": "always"
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": {
+          "id": "a1",
+          "locked": false
+        },
+        "env": {
+          "hour_utc": 10
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "eq actor/resource true",
+      "cond": {
+        "kind": "eq",
+        "left": {
+          "kind": "ref",
+          "scope": "resource",
+          "attr": "id"
+        },
+        "right": {
+          "kind": "ref",
+          "scope": "actor",
+          "attr": "id"
+        }
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": {
+          "id": "a1",
+          "locked": false
+        },
+        "env": {
+          "hour_utc": 10
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "eq actor/resource false",
+      "cond": {
+        "kind": "eq",
+        "left": {
+          "kind": "ref",
+          "scope": "resource",
+          "attr": "id"
+        },
+        "right": {
+          "kind": "ref",
+          "scope": "actor",
+          "attr": "id"
+        }
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": {
+          "id": "b2",
+          "locked": true
+        },
+        "env": {
+          "hour_utc": 23
+        }
+      },
+      "expected": false
+    },
+    {
+      "name": "ne",
+      "cond": {
+        "kind": "not",
+        "cond": {
+          "kind": "eq",
+          "left": {
+            "kind": "ref",
+            "scope": "resource",
+            "attr": "id"
+          },
+          "right": {
+            "kind": "ref",
+            "scope": "actor",
+            "attr": "id"
+          }
+        }
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": {
+          "id": "b2",
+          "locked": true
+        },
+        "env": {
+          "hour_utc": 23
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "eq literal",
+      "cond": {
+        "kind": "eq",
+        "left": {
+          "kind": "ref",
+          "scope": "actor",
+          "attr": "role"
+        },
+        "right": {
+          "kind": "lit",
+          "value": "member"
+        }
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": {
+          "id": "a1",
+          "locked": false
+        },
+        "env": {
+          "hour_utc": 10
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "eq bool literal",
+      "cond": {
+        "kind": "eq",
+        "left": {
+          "kind": "ref",
+          "scope": "resource",
+          "attr": "locked"
+        },
+        "right": {
+          "kind": "lit",
+          "value": true
+        }
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": {
+          "id": "b2",
+          "locked": true
+        },
+        "env": {
+          "hour_utc": 23
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "eq env",
+      "cond": {
+        "kind": "eq",
+        "left": {
+          "kind": "ref",
+          "scope": "env",
+          "attr": "hour_utc"
+        },
+        "right": {
+          "kind": "lit",
+          "value": 10
+        }
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": {
+          "id": "a1",
+          "locked": false
+        },
+        "env": {
+          "hour_utc": 10
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "not",
+      "cond": {
+        "kind": "not",
+        "cond": {
+          "kind": "eq",
+          "left": {
+            "kind": "ref",
+            "scope": "resource",
+            "attr": "locked"
+          },
+          "right": {
+            "kind": "lit",
+            "value": true
+          }
+        }
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": {
+          "id": "a1",
+          "locked": false
+        },
+        "env": {
+          "hour_utc": 10
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "all",
+      "cond": {
+        "kind": "all",
+        "conds": [
+          {
+            "kind": "eq",
+            "left": {
+              "kind": "ref",
+              "scope": "resource",
+              "attr": "id"
+            },
+            "right": {
+              "kind": "ref",
+              "scope": "actor",
+              "attr": "id"
+            }
+          },
+          {
+            "kind": "not",
+            "cond": {
+              "kind": "eq",
+              "left": {
+                "kind": "ref",
+                "scope": "resource",
+                "attr": "locked"
+              },
+              "right": {
+                "kind": "lit",
+                "value": true
+              }
+            }
+          }
+        ]
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": {
+          "id": "a1",
+          "locked": false
+        },
+        "env": {
+          "hour_utc": 10
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "all short",
+      "cond": {
+        "kind": "all",
+        "conds": [
+          {
+            "kind": "eq",
+            "left": {
+              "kind": "ref",
+              "scope": "resource",
+              "attr": "id"
+            },
+            "right": {
+              "kind": "ref",
+              "scope": "actor",
+              "attr": "id"
+            }
+          },
+          {
+            "kind": "eq",
+            "left": {
+              "kind": "ref",
+              "scope": "resource",
+              "attr": "locked"
+            },
+            "right": {
+              "kind": "lit",
+              "value": true
+            }
+          }
+        ]
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": {
+          "id": "a1",
+          "locked": false
+        },
+        "env": {
+          "hour_utc": 10
+        }
+      },
+      "expected": false
+    },
+    {
+      "name": "any",
+      "cond": {
+        "kind": "any",
+        "conds": [
+          {
+            "kind": "eq",
+            "left": {
+              "kind": "ref",
+              "scope": "resource",
+              "attr": "locked"
+            },
+            "right": {
+              "kind": "lit",
+              "value": true
+            }
+          },
+          {
+            "kind": "eq",
+            "left": {
+              "kind": "ref",
+              "scope": "env",
+              "attr": "hour_utc"
+            },
+            "right": {
+              "kind": "lit",
+              "value": 23
+            }
+          }
+        ]
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": {
+          "id": "b2",
+          "locked": true
+        },
+        "env": {
+          "hour_utc": 23
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "any none",
+      "cond": {
+        "kind": "any",
+        "conds": [
+          {
+            "kind": "eq",
+            "left": {
+              "kind": "ref",
+              "scope": "resource",
+              "attr": "locked"
+            },
+            "right": {
+              "kind": "lit",
+              "value": true
+            }
+          },
+          {
+            "kind": "eq",
+            "left": {
+              "kind": "ref",
+              "scope": "env",
+              "attr": "hour_utc"
+            },
+            "right": {
+              "kind": "lit",
+              "value": 1
+            }
+          }
+        ]
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": {
+          "id": "a1",
+          "locked": false
+        },
+        "env": {
+          "hour_utc": 10
+        }
+      },
+      "expected": false
+    },
+    {
+      "name": "missing resource",
+      "cond": {
+        "kind": "eq",
+        "left": {
+          "kind": "ref",
+          "scope": "resource",
+          "attr": "id"
+        },
+        "right": {
+          "kind": "ref",
+          "scope": "actor",
+          "attr": "id"
+        }
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": null,
+        "env": {}
+      },
+      "expected": "missing"
+    },
+    {
+      "name": "missing under not",
+      "cond": {
+        "kind": "not",
+        "cond": {
+          "kind": "eq",
+          "left": {
+            "kind": "ref",
+            "scope": "resource",
+            "attr": "id"
+          },
+          "right": {
+            "kind": "ref",
+            "scope": "actor",
+            "attr": "id"
+          }
+        }
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": null,
+        "env": {}
+      },
+      "expected": "missing"
+    },
+    {
+      "name": "missing env attr",
+      "cond": {
+        "kind": "eq",
+        "left": {
+          "kind": "ref",
+          "scope": "env",
+          "attr": "hour_utc"
+        },
+        "right": {
+          "kind": "lit",
+          "value": 1
+        }
+      },
+      "ctx": {
+        "actor": {
+          "id": "a1",
+          "role": "member",
+          "is_active": true
+        },
+        "resource": null,
+        "env": {}
+      },
+      "expected": "missing"
+    }
+  ]
+}

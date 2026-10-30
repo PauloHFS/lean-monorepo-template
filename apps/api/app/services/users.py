@@ -54,7 +54,7 @@ async def list_users(
     rows = (
         (
             await session.execute(
-                scope.query(_LIST_SQL), {**scope.params, "lim": limit, "off": offset}
+                scope.apply(_LIST_SQL), {**scope.params, "lim": limit, "off": offset}
             )
         )
         .mappings()

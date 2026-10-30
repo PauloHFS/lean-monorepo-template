@@ -9,7 +9,7 @@ whitelist `RESOURCE_COLUMNS`; valores (ator/ambiente/literais) viram bind params
 `:perm_N`. Subárvores só com ator/ambiente/literais são resolvidas em tempo de
 compilação (constant folding), então `TRUE`/`FALSE` sem tocar no banco.
 
-Este arquivo é o ÚNICO lugar autorizado a montar SQL dinâmico (ver `SqlFilter.query`
+Este arquivo é o ÚNICO lugar autorizado a montar SQL dinâmico (ver `SqlFilter.apply`
 e a exceção em `semgrep.yml`).
 """
 
@@ -47,7 +47,7 @@ class SqlFilter:
     clause: str
     params: dict[str, Scalar] = field(default_factory=lambda: {})
 
-    def query(self, template: str) -> TextClause:
+    def apply(self, template: str) -> TextClause:
         """Injeta o predicado no lugar de `__SCOPE__` de um template LITERAL.
 
         Bind params: passe `self.params` junto com os seus no `execute`.
