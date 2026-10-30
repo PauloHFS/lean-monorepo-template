@@ -33,6 +33,8 @@ URLs:
 - Tempo API: <http://localhost:3200>
 - Prometheus: <http://localhost:9090>
 
+> 💡 **Em Produção com OpenObserver**: Se você optar por rodar o OpenObserver no Coolify como serviço satélite (all-in-one para logs, traces e métricas), não precisa subir Tempo/Prometheus/Grafana. Apenas configure `OTEL_EXPORTER_OTLP_ENDPOINT=http://openobserver:5080/api/default` na aplicação e acesse a UI do OpenObserver diretamente.
+
 As portas do stack de observability (Grafana 3000, Tempo 3200, Prometheus 9090,
 OTel Collector 4317/4318) e do Mailpit (1025/8025) publicam **só em loopback**
 (`127.0.0.1`) — igual no dev local, e na VPS nada fica exposto na internet.

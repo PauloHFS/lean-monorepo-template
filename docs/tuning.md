@@ -240,12 +240,13 @@ RELOAD;          -- recarrega a config
 
 ### O que ela dá
 
-- **Backup de volume** (S3/R2), com "Stop during backup" para consistência;
+- **Backup nativo de Database** (S3/R2 via `pg_dump`), configurável direto na aba Backups do recurso PostgreSQL (com agendamento cron, sem derrubar o banco e sem "Stop during backup");
+- **Backup de volume** (S3/R2 para outros serviços);
 - **proxy e certificados** (Traefik), inclusive DNS-01;
 - **log drains**;
 - **Sentinel**.
 
-O backup de volume é `tar.gz` do data dir e exige o **mesmo major** do Postgres e o banco parado no restore. O restore **confiável** continua sendo o **dump lógico** do repo: `scripts/backup.sh` (`pg_dump -Fc` + sanidade `pg_restore --list`), provado por `just test-restore` e pelo job `restore-test` do CI.
+O backup nativo do Coolify para Databases gera dumps lógicos via `pg_dump` para o R2/S3. Em paralelo, o repositório mantém seus scripts de restauração e prova de integridade (`scripts/backup.sh`, `restore.sh` e `test-restore.sh`), provados por `just test-restore` e pelo job `restore-test` do CI.
 
 ### Postgres gerenciado e serverless
 
