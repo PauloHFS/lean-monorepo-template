@@ -247,7 +247,7 @@ jobs:
           persist-credentials: false
 
       - name: Build image
-        run: docker build --build-arg NODE_VERSION="$(cat .node-version)" -t lean-monorepo:ci .
+        run: docker build --build-arg NODE_VERSION="$(cat .node-version)" -t python-postgres-full-template:ci .
 
       # Mede o tamanho real da imagem e falha acima do teto, para travar regressão de layers.
       - name: Image size
@@ -255,9 +255,9 @@ jobs:
           MAX_IMAGE_MB: "700"
         run: |
           set -euo pipefail
-          bytes=$(docker image inspect lean-monorepo:ci --format '{{.Size}}')
+          bytes=$(docker image inspect python-postgres-full-template:ci --format '{{.Size}}')
           mb=$(awk -v b="$bytes" 'BEGIN { printf "%.1f", b / 1000000 }')
-          echo "Imagem lean-monorepo:ci: ${mb} MB (teto: ${MAX_IMAGE_MB} MB)"
+          echo "Imagem python-postgres-full-template:ci: ${mb} MB (teto: ${MAX_IMAGE_MB} MB)"
           echo "| imagem | ${mb} MB |" >> "$GITHUB_STEP_SUMMARY"
           awk -v mb="$mb" -v max="$MAX_IMAGE_MB" 'BEGIN { exit (mb > max) ? 1 : 0 }' || {
             echo "::error::Imagem ${mb} MB excede o teto de ${MAX_IMAGE_MB} MB"
@@ -307,7 +307,7 @@ jobs:
       - name: Trivy (vulns na imagem)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: lean-monorepo:ci
+          image-ref: python-postgres-full-template:ci
           format: table
           exit-code: "1"
           severity: CRITICAL,HIGH

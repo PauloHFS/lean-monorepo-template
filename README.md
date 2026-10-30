@@ -1,6 +1,6 @@
-# Lean Monorepo
+# Python Postgres Full Template
 
-Template enxuto de monoprojeto com:
+Template enxuto e modular de monoprojeto (Full-stack FastAPI + React 19 + PostgreSQL 18) com:
 
 - **Backend** Python 3.13 + FastAPI 0.162 + SQLAlchemy 2.0 async + Alembic 1.20
 - **Worker** [Procrastinate](https://procrastinate.readthedocs.io/) 3.10.0 (Postgres-only, mesma imagem da API)
@@ -179,6 +179,126 @@ Duas regras para o contrato não se degradir:
 - **`just check-schema` também é gate semântico**: além do diff de bytes, ele falha se alguma resposta de rota virar `Record<string, never>`/`unknown`. Rodar `just web-types` sem modelar a resposta não passa no CI.
 
 No front, os tipos vêm de `components["schemas"][...]` (reexportados em `src/api/types.ts`) — não redeclare shape de resposta à mão.
+
+---
+
+## Checklist de Uso do Template: Do Zero ao Deploy no Coolify
+
+Siga este passo a passo cronológico para subir um novo projeto a partir deste template:
+
+### Fase 1: Setup do Repositório Local
+- [ ] **1. Clonar ou criar o repo a partir do template** na sua máquina.
+- [ ] **2. Renomear o projeto** seguindo a seção [Como Renomear o Projeto](#como-renomear-o-projeto-novo-app-a-partir-deste-template):
+  - `apps/api/app/core/config.py` (`app_name = "seu-app"`)
+  - `apps/api/pyproject.toml` (`name = "seu-app-api"`) + `cd apps/api && uv lock`
+  - `apps/web/package.json` (`"name": "seu-app-web"`) + `cd apps/web && npm install --package-lock-only`
+  - `docker-compose.yml` (`name: seu-app`)
+  - `.env` e `.env.example` (`BACKUP_DIR=/tmp/seu-app-backups`)
+- [ ] **3. Validar localmente**:
+  - `cp .env.example .env` e preencher segredos.
+  - `just up` (sobe containers locais com Postgres para dev).
+  - `just ci` (valida toda a suíte de testes e contratos).
+  - Faça o primeiro commit e push na branch `main` do seu novo repositório GitHub.
+
+---
+
+### Fase 2: Provisionar a Infraestrutura no Coolify (Sem Compose em Produção)
+
+#### Passo 1: O Banco de Dados (PostgreSQL)
+- [ ] No Coolify, vá em **+ New Resource** → **Databases** → **PostgreSQL**.
+- [ ] Nomeie o recurso (ex: `app-postgres`).
+- [ ] Guarde as credenciais geradas:
+  - Host na rede Docker: `app-postgres`
+  - Porta: `5432`
+  - Usuário (`POSTGRES_USER`), Senha (`POSTGRES_PASSWORD`), Banco (`POSTGRES_DB`).
+- [ ] Configure os **Backups agendados** na aba *Backups* apontando para seu Cloudflare R2 ou AWS S3.
+- [ ] Clique em **Deploy** do banco.
+
+#### Passo 2: A Aplicação Principal (API + Frontend SPA)
+- [ ] No Coolify, vá em **+ New Resource** → **Application** → **GitHub App / Public/Private Repository**.
+- [ ] Selecione o repositório do seu projeto.
+- [ ] **Build Pack**: Selecione **Dockerfile** (Dockerfile Location: `/Dockerfile`).
+- [ ] Em **Configuration / General**:
+  - **Domains**: Defina seu domínio HTTPS com porta (ex: `https://app.seu-dominio.com:8000`).
+  - **Exposed Port**: `8000`.
+  - **Health Check Path**: `/api/v1/livez`.
+- [ ] Em **Environment Variables**, adicione:
+  ```dotenv
+  APP_ENV=prod
+  SECRET_KEY=<gere-uma-string-segura-32+-chars>
+  COOKIE_SECURE=true
+  WEB_ORIGIN=https://app.seu-dominio.com
+  FORWARDED_ALLOW_IPS=172.16.0.0/12
+
+  # Conexão com o Postgres criado no Passo 1:
+  POSTGRES_HOST=app-postgres
+  POSTGRES_PORT=5432
+  POSTGRES_DB=app
+  POSTGRES_USER=app
+  POSTGRES_PASSWORD=<senha-do-banco>
+
+  SPA_DIST_PATH=/app/apps/web/dist
+  ```
+- [ ] Clique em **Deploy**. A API e o Front SPA subirão no domínio configurado.
+
+#### Passo 3: Executar a Migration Inicial (Manual)
+- [ ] Com a aplicação no ar, acesse o container da aplicação no Coolify.
+- [ ] Vá na aba **Terminal / Exec** (ou Command Task) e execute:
+  ```bash
+  alembic upgrade head
+  ```
+  *(Isso aplica o schema inicial e cria as tabelas de sessão, cache, usuários e jobs no Postgres).*
+- [ ] *(Opcional)* Crie o primeiro superusuário pelo terminal:
+  ```bash
+  python -m app.cli create-user seu-email@dominio.com sua-senha "Seu Nome" --superuser
+  ```
+
+#### Passo 4: O Worker de Filas (Procrastinate)
+- [ ] No Coolify, clique no menu do recurso da aplicação e selecione **Clone Application** (ou crie um novo apontando para o mesmo repo).
+- [ ] Nome: `app-worker`.
+- [ ] Em **General**:
+  - **Domains**: Deixe **vazio** (worker não recebe tráfego HTTP).
+  - **Health Check**: Desative.
+  - **Custom Docker Command** (Start Command):
+    ```bash
+    bash -lc "/app/scripts/entrypoint.sh worker"
+    ```
+- [ ] As variáveis de ambiente já foram clonadas da aplicação.
+- [ ] Clique em **Deploy**. O worker começará a consumir as filas assíncronas.
+
+---
+
+### Fase 3: Conectar os Satélites (Pela Rede Interna do Coolify)
+- [ ] **OpenObserver / OpenTelemetry**:
+  - Suba o container do OpenObserver no Coolify.
+  - Na aplicação `app`, defina `OTEL_EXPORTER_OTLP_ENDPOINT=http://openobserver:5080/api/default`.
+- [ ] **Listmonk / GrowthBook / Mautic**:
+  - Suba cada ferramenta como um recurso separado no Coolify.
+  - Se for usar o mesmo PostgreSQL, entre no terminal do banco (`app-postgres`) e crie bases isoladas:
+    ```sql
+    CREATE DATABASE listmonk;
+    CREATE DATABASE growthbook;
+    ```
+  - Aponte a string de conexão de cada satélite para `app-postgres:5432`.
+
+---
+
+## Como Renomear o Projeto (Novo App a partir deste Template)
+
+Quando você for usar este template para criar um novo produto/projeto (ex: `meu-saas`), basta atualizar os seguintes pontos:
+
+1. **Configuração da API (`apps/api/app/core/config.py`)**:
+   - Altere `app_name: str = "meu-saas"`. Isso define o título no OpenAPI e nos spans de tracing (OTel).
+2. **Dependências Python (`apps/api/pyproject.toml`)**:
+   - Altere `name = "meu-saas-api"` e rode `cd apps/api && uv lock`.
+3. **Frontend (`apps/web/package.json`)**:
+   - Altere `"name": "meu-saas-web"` e rode `cd apps/web && npm install --package-lock-only`.
+4. **Compose Local (`docker-compose.yml`)**:
+   - Altere a primeira linha: `name: meu-saas` (evita conflitos de rede/volume com outros projetos no Docker local).
+5. **Variáveis de Ambiente (`.env.example` e `.env`)**:
+   - Altere `BACKUP_DIR=/tmp/meu-saas-backups`.
+6. **Sincronizar Tipos do Front**:
+   - Execute `just web-types && just check-schema`.
 
 ---
 

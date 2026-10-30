@@ -5,7 +5,7 @@
 # =============================================================================
 
 [project]
-name = "lean-api"
+name = "python-postgres-full-template-api"
 version = "0.1.0"
 requires-python = ">=3.13,<3.14"
 dependencies = [

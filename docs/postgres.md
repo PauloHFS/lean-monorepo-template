@@ -112,4 +112,35 @@ Adicione o módulo em `app/jobs/tasks/`; o worker descobre automaticamente todos
 
 A task `email.send` é o exemplo. Em dev → SMTP para o container `mailpit` (UI em <http://localhost:8025>). Em prod → qualquer SMTP-relay.
 
+## Ciclo de vida de Migrations (Protocolo 80/20 Retrocompatível)
+
+Para garantir zero downtime e permitir que o deploy da aplicação e as migrations ocorram de forma desacoplada:
+
+1. **Sempre Aditiva (N e N+1)**:
+   - Adicione colunas com `nullable=True` ou com `server_default` (no PostgreSQL 11+, adicionar coluna com default constante é uma alteração puramente de metadados O(1), sem reescrever a tabela nem bloquear leituras).
+   - Nunca remova nem renomeie colunas existentes em um único passo.
+
+2. **Rastreabilidade de Migrações em 2 Passos (Expand & Contract)**:
+   - **Passo 1 (Expand)**:
+     - Adiciona a coluna/tabela nova sem mexer na antiga.
+     - Tag obrigatória no código e na migration do Alembic:
+       ```python
+       # EXPAND: [nome_da_mudanca]
+       # Detalhes: Adiciona coluna 'new_col', manter 'old_col' até o contract.
+       ```
+     - A aplicação passa a gravar no formato novo e ler com fallback (`row.new_col or row.old_col`).
+   - **Passo 2 (Contract / Cleanup)**:
+     - Executado em um deploy posterior (após a versão com o Passo 1 estar 100% no ar e os dados antigos saneados).
+     - Tag obrigatória na migration:
+       ```python
+       # CONTRACT: [nome_da_mudanca]
+       # Detalhes: Remove 'old_col' após validação em produção.
+       ```
+     - Remove o campo antigo e limpa os fallbacks no código Python.
+
+3. **Invalidação no PgBouncer**:
+   - DDL em colunas existentes exige descartar os planos de query em cache no pooler (`RECONNECT` ou restart do pooler) para evitar erros de `cached plan must not change result type`.
+
+---
+
 Guia extraído do README. Índice e atalhos: [README](../README.md).

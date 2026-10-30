@@ -45,7 +45,7 @@ class Settings(BaseSettings):
 
     # --- Geral ---
     app_env: Literal["local", "staging", "prod"] = "local"
-    app_name: str = "lean-monorepo"
+    app_name: str = "python-postgres-full-template"
     app_version: str = "0.1.0"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 

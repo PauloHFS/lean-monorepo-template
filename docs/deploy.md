@@ -189,4 +189,143 @@ Acessar o painel do Coolify direto pela porta `:8000` (mesmo via Tailscale) traf
 
 ---
 
+## Deploy Modular no Coolify: Dockerfile / Docker Image (Sem Docker Compose)
+
+Se você quer **desacoplar completamente** o deploy da aplicação em produção de qualquer arquivo Compose e gerenciar os recursos no Coolify individualmente, o caminho ideal é usar o **Build Pack Dockerfile** ou **Docker Image**:
+
+- **PostgreSQL**: Recurso de Banco nativo no Coolify (com backup agendado para S3/R2 e zero risco de restart durante deploys do app).
+- **API (Web SPA + FastAPI)**: Recurso do tipo **Application** usando o `Dockerfile` do repositório (ou puxando a imagem pronta do GHCR).
+- **Worker (Procrastinate)**: Segundo recurso do tipo **Application** apontando para o mesmo repo/imagem, apenas mudando o comando de inicialização.
+- **Migrations manuais**: Controle total de quando rodar DDL/schema upgrades, sem surpresas e sem lock automático no boot.
+- **Satélites**: GrowthBook, Mautic, Listmonk, OpenObserver / OTel rodando cada um no seu próprio recurso.
+
+---
+
+### 1. Provisionar o Banco de Dados (PostgreSQL)
+
+1. No Coolify, vá em **+ New Resource** → **Databases** → **PostgreSQL**.
+2. Nome: `lm-postgres`.
+3. Anote as credenciais:
+   - Host interno na rede Docker: `lm-postgres`
+   - Porta interna: `5432`
+   - `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
+4. Vá na aba **Backups** e configure rotina diária para Cloudflare R2 ou AWS S3.
+5. *(Opcional)* Se for compartilhar este mesmo PostgreSQL com Listmonk ou GrowthBook, acesse o terminal do banco e crie bases separadas:
+   ```sql
+   CREATE DATABASE listmonk;
+   CREATE DATABASE growthbook;
+   ```
+
+---
+
+### 2. Subir a Aplicação Web + API (FastAPI + Front)
+
+1. No Coolify, clique em **+ New Resource** → **Application** → **Public/Private Repository**.
+2. **Build Pack**: Selecione **Dockerfile**.
+3. **Dockerfile Location**: `/Dockerfile`.
+4. Em **General / Configuration**:
+   - **Domains**: `https://app.seu-dominio.com` (apontando para a porta `8000`).
+   - **Exposed Port**: `8000`.
+   - **Health Check Path**: `/api/v1/livez` (liveness que não depende do banco).
+5. Em **Environment Variables**:
+   ```dotenv
+   APP_ENV=prod
+   SECRET_KEY=<gere-uma-string-segura-com-mais-de-32-chars>
+   COOKIE_SECURE=true
+   WEB_ORIGIN=https://app.seu-dominio.com
+   FORWARDED_ALLOW_IPS=172.16.0.0/12
+
+   # Conexão com o banco isolado:
+   POSTGRES_HOST=lm-postgres
+   POSTGRES_PORT=5432
+   POSTGRES_DB=app
+   POSTGRES_USER=app
+   POSTGRES_PASSWORD=<senha-do-postgres>
+
+   # SPA estática servida em /:
+   SPA_DIST_PATH=/app/apps/web/dist
+   ```
+6. O `CMD` default do Dockerfile já sobe a API automaticamente:
+   ```bash
+   bash -lc "/app/scripts/entrypoint.sh api"
+   ```
+
+---
+
+### 3. Subir o Worker (Procrastinate)
+
+O worker processa filas de tarefas (e-mails, webhooks, rotinas em segundo plano) assincronamente.
+
+1. No Coolify, crie outra **Application** apontando para o mesmo repositório Git (ou use **Clone** da aplicação criada no passo 2).
+2. Nome: `lm-worker`.
+3. **Domains**: Deixe **vazio** (o worker não expõe porta nem recebe tráfego HTTP).
+4. Em **General**:
+   - **Custom Docker Command** (ou Start Command):
+     ```bash
+     bash -lc "/app/scripts/entrypoint.sh worker"
+     ```
+   - **Health Check**: Desabilite (worker não tem endpoint HTTP).
+5. Em **Environment Variables**: Use as mesmas variáveis de banco e ambiente configuradas na API.
+
+---
+
+### 4. Como Rodar as Migrations Manualmente
+
+Com o banco de dados e a aplicação isolados, você não quer que cada push na `main` rode DDL no banco automaticamente. Você tem 3 formas simples e seguras de rodar migrations sob demanda:
+
+#### Opção A: Pelo Terminal do Container no Coolify (Recomendado)
+1. No Coolify, abra o container da aplicação `lm-api`.
+2. Vá na aba **Terminal / Exec**.
+3. Execute o comando de migration:
+   ```bash
+   alembic upgrade head
+   ```
+   *(O ambiente do container já possui o venv do uv no `PATH` e as variáveis de conexão com o banco carregadas).*
+
+#### Opção B: Via "One-off Task / Command" no Coolify
+1. Nas configurações da sua aplicação no Coolify, você pode acionar a aba **Commands / Tasks**.
+2. Rode:
+   ```bash
+   /app/scripts/entrypoint.sh migrate
+   ```
+   Ele roda `alembic upgrade head` uma única vez e sai com código 0.
+
+#### Opção C: Da sua máquina local conectada via Tunnel/Wireguard/Tailscale
+1. Com acesso de rede ao Postgres da VPS:
+   ```bash
+   DATABASE_URL="postgresql+asyncpg://app:senha@ip-ou-tailscale:5432/app" just api-migrate
+   ```
+
+---
+
+### 5. Integrando com Satélites (GrowthBook, Mautic, Listmonk, OpenObserver) e Rede
+
+No Coolify, você **não precisa (e nem deve) declarar rede em nenhum arquivo compose**. O Coolify gerencia isso nativamente na infraestrutura:
+
+- **Como funciona a rede no Coolify**: Ao criar recursos (Applications, Databases, Services) dentro do mesmo **Server / Environment / Project**, o Coolify conecta todos automaticamente na mesma rede Docker bridge daquele servidor (geralmente chamada `coolify`).
+- **Resolução de nomes**: Os containers se enxergam pelo **nome do recurso / container_name** (ou UUID interno gerado pelo Coolify). Por exemplo, se seu banco se chama `lm-postgres`, a API o acessa diretamente via `lm-postgres:5432`.
+- **Configuração na UI**: Em qualquer recurso, na aba **Settings / Advanced**, você pode ver ou trocar a rede Docker vinculada (Network), sem encostar em nenhum arquivo `.yml`.
+
+#### OpenTelemetry + OpenObserver
+1. Crie um Resource no Coolify para o **OpenObserver** (usando imagem oficial `public.ecr.aws/zinclabs/openobserver:latest`).
+2. Defina porta web (ex: `5080`) e configure o domínio (ex: `https://logs.seu-dominio.com`).
+3. Na aplicação principal (`lm-api`), adicione nas variáveis de ambiente:
+   ```dotenv
+   OTEL_EXPORTER_OTLP_ENDPOINT=http://openobserver:5080/api/default
+   OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic <token-base64>
+   ```
+
+#### Listmonk (E-mail Marketing / Newsletters)
+1. Suba o template do Listmonk no Coolify (ou Application com a imagem `listmonk/listmonk:latest`).
+2. Aponte a conexão do banco para o `lm-postgres` na base `listmonk`:
+   ```text
+   postgres://listmonk:senha@lm-postgres:5432/listmonk?sslmode=disable
+   ```
+
+#### GrowthBook (Feature Flags / Testes A/B)
+1. Suba o GrowthBook via Resource Docker Image (`growthbook/growthbook:latest`) ou compose oficial.
+2. Defina o endpoint da API do GrowthBook e consuma no front do `apps/web` sem qualquer atrito.
+
+---
+
 Guia extraído do README. Índice e atalhos: [README](../README.md).

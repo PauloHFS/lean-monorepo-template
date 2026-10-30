@@ -13,7 +13,7 @@
 # automaticamente pelo `docker compose` sem `-f`. O Coolify e o CI usam `-f`
 # explícito e portanto ignoram o override.
 # =============================================================================
-name: lean-monorepo
+name: python-postgres-full-template
 
 services:
   postgres:
@@ -173,7 +173,7 @@ services:
   # artefato — sem `image:`, o Compose criaria uma tag por serviço e o
   # Coolify.buildaria a mesma imagem três vezes.
   migrate:
-    image: ${APP_IMAGE:-lean-monorepo:local}
+    image: ${APP_IMAGE:-python-postgres-full-template:local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -196,7 +196,7 @@ services:
     command: ["bash", "-lc", "/app/scripts/entrypoint.sh migrate"]
 
   api:
-    image: ${APP_IMAGE:-lean-monorepo:local}
+    image: ${APP_IMAGE:-python-postgres-full-template:local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -226,7 +226,7 @@ services:
     command: ["bash", "-lc", "/app/scripts/entrypoint.sh api"]
 
   worker:
-    image: ${APP_IMAGE:-lean-monorepo:local}
+    image: ${APP_IMAGE:-python-postgres-full-template:local}
     build:
       context: .
       dockerfile: Dockerfile
