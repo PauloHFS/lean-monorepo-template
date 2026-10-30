@@ -56,11 +56,11 @@ dependencies = [
 dev = [
     # --- Testes ---
     "pytest==9.1.1",
-    "pytest-asyncio==1.4.0",
+    "pytest-asyncio==1.4.1",
     # --- Testes de propriedades (MPL-2.0) ---
-    "hypothesis==6.170.9",
+    "hypothesis==6.170.12",
     # --- Lint / type / SAST ---
-    "ruff==0.17.2",
+    "ruff==0.17.3",
     "pyright==1.1.414",
     "bandit==1.9.4",
 ]
